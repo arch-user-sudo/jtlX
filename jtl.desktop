@@ -1,0 +1,5 @@
+[Desktop Entry]
+Name=jtl
+Comment=Gaming wayland compositor
+Exec=jtl
+Type=Application
