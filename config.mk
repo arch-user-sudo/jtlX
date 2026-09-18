@@ -16,11 +16,11 @@ MANDIR = $(PREFIX)/share/man
 DATADIR = $(PREFIX)/share
 
 # Uncomment to build XWayland support
-XWAYLAND = -DXWAYLAND
-XLIBS = xcb xcb-composite xcb-ewmh xcb-icccm xcb-render xcb-res xcb-xfixes xcb-shape
+# XWAYLAND = -DXWAYLAND
+# XLIBS = xcb xcb-composite xcb-ewmh xcb-icccm xcb-render xcb-res xcb-xfixes xcb-shape
 
 # Uncomment to enable fullscreen tearing support (Mod+O enable, Mod+P disable)
-FULLSCREEN_TEARING = -DFULLSCREEN_TEARING
+#FULLSCREEN_TEARING = -DFULLSCREEN_TEARING
 
 # Uncomment to enable foreign toplevel management (for waybar, nwg-bar, etc.)
 FOREIGN_TOPLEVEL = -DFOREIGN_TOPLEVEL

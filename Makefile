@@ -17,7 +17,18 @@ WAYLAND_PROTOCOLS = `$(PKG_CONFIG) --variable=pkgdatadir wayland-protocols`
 #     | grep -vE '^render/vulkan/(renderer|texture|pixel_format|vulkan|util|pass)\.c$$' \
 #     | grep -vE 'libliftoff\.c$$|color_lcms2\.c$$|dmabuf_fallback\.c$$' | sort
 WLR_SRC := $(shell cat wlroots.build-files.txt)
-WLR_OBJ = $(WLR_SRC:%.c=$(BUILD)/%.o)
+XWAYLAND_SRC = xwayland/server.c xwayland/shell.c xwayland/sockets.c \
+	xwayland/xwayland.c xwayland/xwm.c \
+	xwayland/selection/selection.c xwayland/selection/dnd.c \
+	xwayland/selection/incoming.c xwayland/selection/outgoing.c
+# Drop wlroots' XWayland module (and its xcb link deps) when XWAYLAND is off
+ifdef XWAYLAND
+NO_XW_OBJ =
+else
+NO_XW_OBJ = $(XWAYLAND_SRC:%.c=$(BUILD)/%.o)
+endif
+WLR_OBJ = $(filter-out $(NO_XW_OBJ),$(WLR_SRC:%.c=$(BUILD)/%.o))
+WLR_HAS_XWAYLAND = $(if $(XWAYLAND),1,0)
 
 # protocol basenames — mirrors wlroots/protocol/meson.build
 PROTO_NAMES = \
@@ -155,12 +166,13 @@ $(BUILD)/include/config.h:
 	'#define HAVE_LINUX_SYNC_FILE 1' '' \
 	'#define HAVE_LIBINPUT_BUSTYPE 1' '' \
 	'#define HAVE_LIBINPUT_SWITCH_KEYPAD_SLIDE 1' '' \
+	'#define ICONDIR "/usr/share/icons"' > $@
+	@if [ -n "$(XWAYLAND)" ]; then printf '%s\n' \
 	'#define HAVE_XWAYLAND_LISTENFD 1' '' \
 	'#define HAVE_XWAYLAND_NO_TOUCH_POINTER_EMULATION 1' '' \
 	'#define HAVE_XWAYLAND_FORCE_XRANDR_EMULATION 1' '' \
 	'#define HAVE_XWAYLAND_TERMINATE_DELAY 1' '' \
-	'#define ICONDIR "/usr/share/icons"' '' \
-	'#define XWAYLAND_PATH "/usr/bin/Xwayland"' > $@
+	'#define XWAYLAND_PATH "/usr/bin/Xwayland"' >> $@; fi
 
 $(BUILD)/include/wlr/config.h:
 	@mkdir -p $(BUILD)/include/wlr
@@ -174,7 +186,7 @@ $(BUILD)/include/wlr/config.h:
 	'#define WLR_HAS_VULKAN_RENDERER 0' \
 	'#define WLR_HAS_GBM_ALLOCATOR 1' \
 	'#define WLR_HAS_UDMABUF_ALLOCATOR 1' \
-	'#define WLR_HAS_XWAYLAND 1' \
+	'#define WLR_HAS_XWAYLAND $(WLR_HAS_XWAYLAND)' \
 	'#define WLR_HAS_SESSION 1' \
 	'#define WLR_HAS_COLOR_MANAGEMENT 0' '' \
 	'#endif' > $@

@@ -2057,6 +2057,8 @@ static void
 client_set_border_color(Client *c, const float color[static 4])
 {
 	int i;
+	if (client_is_unmanaged(c))
+		return;
 	for (i = 0; i < 4; i++)
 		wlr_scene_rect_set_color(c->border[i], color);
 }
