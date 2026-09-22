@@ -2918,6 +2918,7 @@ tween_cancel(Client *c)
 
 struct anim_scale_data {
 	struct wlr_box dest;
+	struct wlr_surface *surface;
 };
 
 static void
@@ -2933,18 +2934,11 @@ static void
 scale_buffer(struct wlr_scene_buffer *buffer, int sx, int sy, void *user_data)
 {
 	struct anim_scale_data *data = user_data;
-	{
-		struct wlr_scene_surface *scene_surface =
-				wlr_scene_surface_try_from_buffer(buffer);
-		if (scene_surface) {
-			struct wlr_xdg_surface *xdg_surface =
-					wlr_xdg_surface_try_from_wlr_surface(
-					scene_surface->surface);
-			if (xdg_surface && xdg_surface->role
-					!= WLR_XDG_SURFACE_ROLE_TOPLEVEL)
-				return;
-		}
-	}
+	struct wlr_scene_surface *scene_surface =
+			wlr_scene_surface_try_from_buffer(buffer);
+
+	if (!scene_surface || scene_surface->surface != data->surface)
+		return;
 
 	wlr_scene_buffer_set_dest_size(buffer, data->dest.width, data->dest.height);
 }
@@ -2997,6 +2991,7 @@ animateclient(Client *c)
 	if (animating) {
 		struct anim_scale_data scale = {
 			.dest = { .width = cw, .height = ch },
+			.surface = client_surface(c),
 		};
 		wlr_scene_node_for_each_buffer(
 				&c->scene_surface->node,
