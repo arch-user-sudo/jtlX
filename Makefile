@@ -109,14 +109,97 @@ PIXMAN_SRC = pixman.c pixman-access.c pixman-access-accessors.c pixman-arm.c \
 PIXMAN_COM_OBJ = $(addprefix $(BUILD)/pixman/,$(PIXMAN_SRC:%.c=%.o))
 PIXMAN_SIMD_OBJ = $(addprefix $(BUILD)/pixman/,pixman-mmx.o pixman-sse2.o pixman-ssse3.o)
 PIXMAN_CONFIG = $(BUILD)/pixman/pixman-config.h $(BUILD)/pixman/pixman-version.h
+# libwayland source list — mirrors libwayland/src/meson.build. libwayland-util
+# plus the private connection/OS helpers, libwayland-server and
+# libwayland-client (wlroots' wayland backend needs the client side).
+# libwayland-cursor and libwayland-egl are client-side helpers, not needed here.
+# The generated core protocol marshalling code is shared by the server and the
+# client library, so it is compiled exactly once.
+WAYLAND_SRC = wayland-util.c connection.c wayland-os.c \
+	wayland-server.c wayland-shm.c event-loop.c wayland-client.c
+WAYLAND_OBJ = $(addprefix $(BUILD)/libwayland/,$(WAYLAND_SRC:%.c=%.o)) \
+	$(BUILD)/wayland/wayland-protocol.o
 CONFIG_HEADERS = $(BUILD)/include/config.h $(BUILD)/include/wlr/config.h $(BUILD)/include/wlr/version.h
 ALL_OBJS = $(WLR_OBJ) $(PROTO_OBJ) $(PNPID_OBJ) $(LIFTOFF_OBJ) $(DI_OBJ) \
-	$(PIXMAN_COM_OBJ) $(PIXMAN_SIMD_OBJ)
+	$(PIXMAN_COM_OBJ) $(PIXMAN_SIMD_OBJ) $(WAYLAND_OBJ) $(LIBINPUT_OBJ)
 
-# PKGS used by both compilation and linking (wlroots, libliftoff, libdisplay-info
-# and pixman are vendored, so their own .pc files are no longer needed)
-PKGS = wayland-server wayland-client xkbcommon libinput libdrm \
-	libseat libudev gbm egl glesv2 $(XLIBS)
+# ---- Mesa (vendored, RadeonSI only) ----
+#
+# Mesa is deliberately *not* built with LTO. Upstream refuses it ("Building
+# Mesa with LTO is not supported"), and trying it anyway was a bad trade here:
+# the jtl link took over 12 minutes and had not finished, and the partially
+# written binary was already 57 MB against 28 MB for the plain link. The rest of
+# jtl keeps its -flto. These flags have to be written as a JSON array: meson
+# does not split the comma form into separate arguments, and repeated -Dopt+=
+# does not accumulate.
+#
+# Mesa is built by Meson as a set of static libraries into $(MESA_PREFIX) and
+# linked into jtl like every other vendored library here. Two Mesa patches make
+# that possible: libgbm and its DRI backend honour default_library, and
+# -Dstatic-gbm-backend links the backend into libgbm instead of having libgbm
+# dlopen() dri_gbm.so (the only dlopen() left in this graphics stack - wlroots
+# resolves EGL/GLES through eglGetProcAddress, and Mesa's own EGL/GLESv2 link
+# Gallium directly). Everything below stays a normal jtl link input, so there is
+# no rpath, no backend search path and no system Mesa involved.
+MESA_DIR = mesa
+MESA_BUILD = $(BUILD)/mesa
+MESA_PREFIX = $(abspath $(MESA_BUILD)/prefix)
+MESA_LIBDIR = $(MESA_PREFIX)/lib
+# where `make install` puts the Mesa tree, so an installed jtl keeps working
+
+# Bare minimum for this machine: RadeonSI on the amdgpu kernel driver. No
+# Vulkan (wlroots' Vulkan renderer is disabled as well), no GLX, no desktop
+# OpenGL, no X11/Wayland window-system platform code (the compositor only needs
+# the GBM and surfaceless EGL platforms) and no tests.
+MESA_OPTS = \
+	--prefix=$(MESA_PREFIX) --libdir=lib \
+	-Dbuild-tests=false \
+	-Dgallium-drivers=radeonsi \
+	-Dvulkan-drivers= \
+	-Dglvnd=disabled \
+	-Dopengl=false -Dglx=disabled \
+	-Dgles1=disabled -Dgles2=enabled -Degl=enabled -Dgbm=enabled \
+	-Dplatforms= \
+	-Dllvm=enabled \
+	-Dvalgrind=disabled -Dlibunwind=disabled -Dstrip=true \
+	-Doptimization=2 -Ddebug=false \
+	"-Dc_args=['-march=native','-mtune=native','-pipe']" \
+	"-Dcpp_args=['-march=native','-mtune=native','-pipe']" \
+	-Dspirv-tools=disabled \
+	-Db_ndebug=true \
+	--default-library=static \
+	-Dstatic-gbm-backend=true \
+	-Dgallium-va=disabled
+
+# Meson's static libraries hold only their own objects (the link_with/link_whole
+# dependencies stay separate), so the whole archive set is linked. Order is
+# irrelevant inside the group. The system libraries are what the shared Mesa
+# objects used to need.
+MESA_LIBS = -Wl,--start-group $$(find $(MESA_BUILD) -name '*.a') -Wl,--end-group \
+	-L/usr/lib/llvm/22/lib64 -lLLVM-22 \
+	-ldrm -ldrm_amdgpu -lexpat -lz -lzstd -lelf -lstdc++
+
+# PKGS used by both compilation and linking (wlroots, libliftoff, libdisplay-info,
+# pixman, libwayland and Mesa are vendored, so their own .pc files are no longer
+# needed; libwayland still needs libffi, and so do we now)
+# libinput 1.32 parses evdev through libevdev (1.31.3 did its own), so the
+# vendored copy needs its headers and its library.
+PKGS = xkbcommon libevdev libdrm libffi libseat libudev $(XLIBS)
+# Mesa is vendored as well, so only its headers come from the system
+PKGS_HEADERS = egl glesv2 gbm
+# EGL/GLES/gbm headers come from the vendored Mesa so that they match the
+# headers the archives in MESA_LIBS were built against.
+PKG_CFLAGS = -I$(MESA_DIR)/include `$(PKG_CONFIG) --cflags $(PKGS)` `$(PKG_CONFIG) --cflags $(PKGS_HEADERS)`
+PKG_LIBS = `$(PKG_CONFIG) --libs $(PKGS)`
+
+# libwayland compile flags. libwayland's private sources include "../config.h",
+# so the generated config header is put one directory above a quoted-include
+# directory to make that resolve to $(BUILD)/wayland/config.h
+WAYLAND_DEFS = -D_POSIX_C_SOURCE=200809L
+WAYLAND_INCS = -iquote $(BUILD)/wayland/include -I$(BUILD)/wayland \
+	-Ilibwayland/src
+WAYLAND_CFLAGS = $(WAYLAND_DEFS) $(WAYLAND_INCS) \
+	`$(PKG_CONFIG) --cflags libffi` $(CFLAGS)
 
 # wlroots compile flags
 WLRDEFS = -D_POSIX_C_SOURCE=200809L -DWLR_USE_UNSTABLE -DWLR_PRIVATE= \
@@ -127,29 +210,98 @@ WLRWARN = -Wundef -Wlogical-op -Wmissing-include-dirs -Wold-style-definition \
 	-Woverflow -Wmissing-prototypes -Walloca \
 	-Wno-missing-braces -Wno-missing-field-initializers -Wno-unused-parameter
 WLRINCS = -I$(BUILD)/include -Iwlroots/include -I$(BUILD)/protocol -I$(BUILD)/shaders \
+	-I$(BUILD)/wayland -Ilibwayland/src \
 	-Ilibliftoff/include -Ilibdisplay-info/include -Ipixman -I$(BUILD)/pixman \
-	`$(PKG_CONFIG) --cflags $(PKGS)`
+	-I$(LIBINPUT_PUBLIC_INC) \
+	$(PKG_CFLAGS)
 WLR_CFLAGS = $(WLRDEFS) $(WLRWARN) $(WLRINCS) $(CFLAGS)
+
+# libinput source list — canonical list vendored beside the Makefile, same
+# shape as wlroots.build-files.txt. Regenerate after updating libinput with:
+#   cd libinput && ls src/*.c \
+#     | grep -vE 'libinput-plugin-(lua|mtdev)\.c$$' | sort \
+#     > ../libinput.build-files.txt
+# The two plugins are left out because this build has neither Lua nor mtdev -
+# upstream only adds them when dep_lua.found()/have_mtdev hold, and
+# libinput-plugin-mtdev.c includes <mtdev-plumbing.h> unconditionally, so it
+# would not even compile without those headers. The system libinput 1.31.3 this
+# replaces was built without mtdev and libwacom too, so libwacom stays off as
+# well and udev remains the only new-ish dependency.
+LIBINPUT_SRC := $(shell cat libinput.build-files.txt)
+LIBINPUT_OBJ = $(LIBINPUT_SRC:%.c=$(BUILD)/libinput/%.o)
+LIBINPUT_VERSION := $(shell sed -n "s/.*version *: *'\([^']*\)'.*/\1/p" libinput/meson.build | head -1)
+LIBINPUT_VER_MAJOR := $(word 1,$(subst ., ,$(LIBINPUT_VERSION)))
+LIBINPUT_VER_MINOR := $(word 2,$(subst ., ,$(LIBINPUT_VERSION)))
+LIBINPUT_VER_MICRO := $(word 3,$(subst ., ,$(LIBINPUT_VERSION)))
+
+# libinput's private sources include "config.h" and "libinput-version.h",
+# which meson generates upstream. Both are reproduced under $(BUILD)/libinput
+# so the quoted includes resolve there instead of picking up jtl's own
+# config.h out of $(BUILD)/include (-iquote only applies to "..." includes).
+LIBINPUT_GEN = $(BUILD)/libinput/config.h \
+	$(BUILD)/libinput/include/libinput-version.h \
+	$(BUILD)/libinput/include/libinput.h
+# Public include dir, laid out like an installed libinput: libinput.h plus
+# libinput-version.h and nothing else. wlroots and jtl see only this, so
+# <linux/input.h> keeps resolving to the kernel header (as it did against the
+# system libinput, which installs its headers flat) rather than to libinput's
+# bundled copy.
+LIBINPUT_PUBLIC_INC = $(BUILD)/libinput/include
+# -Ilibinput is not optional: a few sources include "src/evdev-frame.h", i.e.
+# paths relative to the libinput root, which is what meson's
+# include_directories('.') provides upstream.
+LIBINPUT_INCS = -iquote $(BUILD)/libinput -I$(LIBINPUT_PUBLIC_INC) \
+	-Ilibinput -Ilibinput/src -Ilibinput/include
+# libinput-util.h warns if NDEBUG is set: libinput leans on assert() for its
+# invariants, so it is dropped here rather than for the whole build.
+LIBINPUT_CFLAGS = $(LIBINPUT_INCS) $(PKG_CFLAGS) $(filter-out -DNDEBUG,$(CFLAGS))
 
 # jtl.o compile flags
 DWLCPPFLAGS = -I. -DWLR_USE_UNSTABLE -D_POSIX_C_SOURCE=200809L \
 	-DVERSION=\"$(VERSION)\" $(XWAYLAND) $(FULLSCREEN_TEARING) \
 	$(FOREIGN_TOPLEVEL) $(WORKSPACES) \
 	-DWLR_PRIVATE= -DWLR_LITTLE_ENDIAN=1 -DWLR_BIG_ENDIAN=0
-DWLDEVCFLAGS = -g -Wpedantic -Wall -Wextra -Wdeclaration-after-statement \
+DWLDEVCFLAGS = -Wpedantic -Wall -Wextra -Wdeclaration-after-statement \
 	-Wno-unused-parameter -Wshadow -Wunused-macros -Werror=strict-prototypes \
 	-Werror=implicit -Werror=return-type -Werror=incompatible-pointer-types \
 	-Wfloat-conversion -Wimplicit-fallthrough
 DWLCFLAGS = -Ipixman -I$(BUILD)/pixman \
-	`$(PKG_CONFIG) --cflags $(PKGS)` -I$(BUILD)/include -Iwlroots/include \
-	-I$(BUILD)/protocol $(DWLCPPFLAGS) $(DWLDEVCFLAGS) $(CFLAGS)
+	$(PKG_CFLAGS) -I$(BUILD)/include -Iwlroots/include \
+	-I$(BUILD)/protocol -I$(BUILD)/wayland -Ilibwayland/src \
+	-I$(LIBINPUT_PUBLIC_INC) \
+	$(DWLCPPFLAGS) $(DWLDEVCFLAGS) $(CFLAGS)
 
-LDLIBS = `$(PKG_CONFIG) --libs $(PKGS)` -lm
+LDLIBS = $(PKG_LIBS) $(MESA_LIBS) -lm -lpthread
 
 all: jtl
 
-jtl: jtl.o $(ALL_OBJS)
-	$(CC) $^ $(LDFLAGS) $(LDLIBS) -o $@
+# Mesa is an order-only prerequisite: it has to be there before we link, but
+# rebuilding it should not force jtl to be relinked. Makefile and config.mk are
+# normal prerequisites so that changing a compile or link flag does relink, with
+# the objects listed explicitly so they don't end up on the link line.
+jtl: jtl.o $(ALL_OBJS) Makefile config.mk | mesa
+	$(CC) jtl.o $(ALL_OBJS) $(LDFLAGS) $(LDLIBS) -o $@
+
+# ---- Mesa sub-build ----
+
+# meson/ninja are incremental, so `meson compile` is cheap when Mesa is already
+# up to date and picks up edits to the vendored sources without a reconfigure.
+ifneq ($(filter clean,$(MAKECMDGOALS)),)
+else
+mesa: $(MESA_BUILD)/build.ninja
+	meson compile -C $(MESA_BUILD)
+	DESTDIR= meson install -C $(MESA_BUILD) --only-changed
+endif
+
+# meson regenerates build.ninja itself when meson.build/meson.options change,
+# this only covers a fresh (or wiped) build directory
+$(MESA_BUILD)/build.ninja: mesa/meson.build mesa/meson.options mesa/VERSION Makefile
+	@mkdir -p $(MESA_BUILD)
+	@if [ -f $@ ]; then \
+		meson setup --reconfigure $(MESA_BUILD) $(MESA_DIR) $(MESA_OPTS); \
+	else \
+		meson setup $(MESA_BUILD) $(MESA_DIR) $(MESA_OPTS); \
+	fi
 
 # ---- generated config headers ----
 
@@ -205,6 +357,53 @@ $(BUILD)/include/wlr/version.h:
 	'int wlr_version_get_minor(void);' \
 	'int wlr_version_get_micro(void);' '' \
 	'#endif' > $@
+
+# ---- libwayland generated headers and core protocol ----
+
+# wayland.xml is scanned with the system wayland-scanner, exactly like the
+# protocol XMLs from wayland-protocols below. The -c variants only swap the
+# wayland-{server,client}.h include for the matching -core.h one. config.h
+# mirrors the probes from libwayland/meson.build on Linux/glibc, so note the
+# header probes are #undef and not #define 0 — libwayland tests them with
+# #ifdef (sys/ucred.h is gone from current glibc).
+$(BUILD)/.wayland-stamp: libwayland/protocol/wayland.xml \
+		libwayland/src/wayland-version.h.in
+	@mkdir -p $(BUILD)/wayland/include
+	@printf '%s\n' \
+	'/* Autogenerated by the Meson build system. */' \
+	'#pragma once' '' \
+	'#define HAVE_ACCEPT4' '' \
+	'#define HAVE_BROKEN_MSG_CMSG_CLOEXEC 0' '' \
+	'#define HAVE_GETTID' '' \
+	'#define HAVE_MEMFD_CREATE' '' \
+	'#define HAVE_MKOSTEMP' '' \
+	'#define HAVE_MREMAP' '' \
+	'#define HAVE_POSIX_FALLOCATE' '' \
+	'#define HAVE_PRCTL' '' \
+	'#define HAVE_STRNDUP' '' \
+	'#define HAVE_SYS_PRCTL_H' '' \
+	'#undef HAVE_SYS_PROCCTL_H' '' \
+	'#undef HAVE_SYS_UCRED_H' '' \
+	'#define HAVE_XUCRED_CR_PID 0' '' \
+	'#define PACKAGE "wayland"' '' \
+	'#define PACKAGE_VERSION "1.26.0"' > $(BUILD)/wayland/config.h
+	@sed -e 's/@WAYLAND_VERSION_MAJOR@/1/' \
+	    -e 's/@WAYLAND_VERSION_MINOR@/26/' \
+	    -e 's/@WAYLAND_VERSION_MICRO@/0/' \
+	    -e 's/@WAYLAND_VERSION@/1.26.0/' \
+	    libwayland/src/wayland-version.h.in > $(BUILD)/wayland/wayland-version.h
+	WAYLAND_SCANNER=$$($(PKG_CONFIG) --variable=wayland_scanner wayland-scanner) && \
+	$$WAYLAND_SCANNER server-header libwayland/protocol/wayland.xml \
+		$(BUILD)/wayland/wayland-server-protocol.h && \
+	$$WAYLAND_SCANNER server-header -c libwayland/protocol/wayland.xml \
+		$(BUILD)/wayland/wayland-server-protocol-core.h && \
+	$$WAYLAND_SCANNER client-header libwayland/protocol/wayland.xml \
+		$(BUILD)/wayland/wayland-client-protocol.h && \
+	$$WAYLAND_SCANNER client-header -c libwayland/protocol/wayland.xml \
+		$(BUILD)/wayland/wayland-client-protocol-core.h && \
+	$$WAYLAND_SCANNER public-code libwayland/protocol/wayland.xml \
+		$(BUILD)/wayland/wayland-protocol.c && \
+	touch $@
 
 # ---- protocol generation ----
 
@@ -323,11 +522,13 @@ $(BUILD)/backend/drm/pnpids.c: wlroots/backend/drm/gen_pnpids.sh
 $(BUILD)/protocol/%-protocol.c $(BUILD)/protocol/%-protocol.h \
 	$(BUILD)/protocol/%-client-protocol.h: $(BUILD)/.protos-stamp
 	@true
+$(BUILD)/wayland/wayland-protocol.c: $(BUILD)/.wayland-stamp
+	@true
 $(BUILD)/shaders/%.h: $(BUILD)/.shaders-stamp
 	@true
 
 # wlroots source objects
-$(BUILD)/%.o: wlroots/%.c $(CONFIG_HEADERS) | $(BUILD)/.protos-stamp $(BUILD)/.shaders-stamp $(BUILD)/pixman/pixman-version.h
+$(BUILD)/%.o: wlroots/%.c $(CONFIG_HEADERS) | $(BUILD)/.protos-stamp $(BUILD)/.shaders-stamp $(BUILD)/pixman/pixman-version.h $(BUILD)/.wayland-stamp
 	@mkdir -p $(@D)
 	$(CC) $(WLR_CFLAGS) -c $< -o $@
 
@@ -335,6 +536,16 @@ $(BUILD)/%.o: wlroots/%.c $(CONFIG_HEADERS) | $(BUILD)/.protos-stamp $(BUILD)/.s
 $(BUILD)/protocol/%.o: $(BUILD)/.protos-stamp $(CONFIG_HEADERS)
 	@mkdir -p $(@D)
 	$(CC) $(WLR_CFLAGS) -c $(BUILD)/protocol/$*.c -o $@
+
+# libwayland source objects
+$(BUILD)/libwayland/%.o: libwayland/src/%.c | $(BUILD)/.wayland-stamp
+	@mkdir -p $(@D)
+	$(CC) $(WAYLAND_CFLAGS) -c $< -o $@
+
+# core protocol marshalling code — shared by libwayland-server and -client
+$(BUILD)/wayland/wayland-protocol.o: $(BUILD)/wayland/wayland-protocol.c
+	@mkdir -p $(@D)
+	$(CC) $(WAYLAND_CFLAGS) -c $< -o $@
 
 # pnpids
 $(BUILD)/backend/drm/pnpids.o: $(BUILD)/backend/drm/pnpids.c $(CONFIG_HEADERS)
@@ -356,6 +567,62 @@ $(BUILD)/libdisplay-info/pnp-id-table.c: libdisplay-info/tool/gen-search-table.p
 $(BUILD)/libdisplay-info/%.o: libdisplay-info/%.c
 	@mkdir -p $(@D)
 	$(CC) -Ilibdisplay-info/include $(CFLAGS) -D_POSIX_C_SOURCE=200809L -c $< -o $@
+
+# ---- libinput ----
+
+# Stands in for libinput's meson configure_file(output: 'config.h'). Every
+# define below mirrors a probe in libinput/meson.build, run for this machine:
+# glibc 2.43 (versionsort, sigabbrev_np, locale.h), kernel headers carrying
+# SYS_pidfd_open, gcc 15 accepting the C23 auto keyword, and no xlocale.h.
+#
+# Left out on purpose, matching the system libinput 1.31.3 this replaces:
+# HAVE_LUA/HAVE_PLUGINS/AUTOLOAD_PLUGINS (no Lua, so plugins are never
+# dlopen()ed), HAVE_MTDEV (protocol A multitouch), HAVE_LIBWACOM (tablet quirks
+# keyed on Wacom IDs), HAVE_XLOCALE_H, IS_DEBUG_BUILD (asserts stay live for
+# libinput - $(CFLAGS) has no -DNDEBUG).
+$(BUILD)/libinput/config.h: libinput/meson.build
+	@mkdir -p $(@D)
+	@printf '%s\n' \
+		'/* generated by the Makefile; see libinput/meson.build */' \
+		'#define _GNU_SOURCE 1' \
+		'' \
+		'/* <assert.h> here has no static_assert, so fold it away */' \
+		'#define static_assert(...) /* */' \
+		'' \
+		'#define HAVE_VERSIONSORT 1' \
+		'#define HAVE_PIDFD_OPEN 1' \
+		'#define HAVE_SIGABBREV_NP 1' \
+		'#define HAVE_LOCALE_H 1' \
+		'#define HAVE_C23_AUTO 1' \
+		'' \
+		'#define HTTP_DOC_LINK "https://wayland.freedesktop.org/libinput/doc/$(LIBINPUT_VERSION)"' \
+		'' \
+		'/* Quirks come from the vendored tree: jtl installs no libinput' \
+		' * data files, so LIBINPUT_QUIRKS_SRCDIR is the fallback path. */' \
+		'#define LIBINPUT_QUIRKS_DIR "$(CURDIR)/libinput/quirks"' \
+		'#define LIBINPUT_QUIRKS_SRCDIR "$(CURDIR)/libinput/quirks"' \
+		'#define LIBINPUT_QUIRKS_OVERRIDE_FILE "/etc/libinput/local-overrides.quirk"' \
+		'' \
+		'/* Only ever read with HAVE_PLUGINS, but referenced unconditionally */' \
+		'#define LIBINPUT_PLUGIN_LIBDIR "/usr/local/lib/libinput/plugins"' \
+		'#define LIBINPUT_PLUGIN_ETCDIR "/etc/libinput/plugins"' \
+		> $@
+
+$(BUILD)/libinput/include/libinput-version.h: libinput/src/libinput-version.h.in \
+		libinput/meson.build
+	@mkdir -p $(@D)
+	sed -e 's/@LIBINPUT_VERSION_MAJOR@/$(LIBINPUT_VER_MAJOR)/' \
+	    -e 's/@LIBINPUT_VERSION_MINOR@/$(LIBINPUT_VER_MINOR)/' \
+	    -e 's/@LIBINPUT_VERSION_MICRO@/$(LIBINPUT_VER_MICRO)/' \
+	    -e 's/@LIBINPUT_VERSION@/$(LIBINPUT_VERSION)/' $< > $@
+
+$(BUILD)/libinput/include/libinput.h: libinput/src/libinput.h
+	@mkdir -p $(@D)
+	ln -sf $(CURDIR)/libinput/src/libinput.h $@
+
+$(BUILD)/libinput/src/%.o: libinput/src/%.c $(LIBINPUT_GEN)
+	@mkdir -p $(@D)
+	$(CC) $(LIBINPUT_CFLAGS) -c $< -o $@
 
 # ---- pixman ----
 
@@ -414,20 +681,34 @@ $(BUILD)/pixman/pixman-ssse3.o: pixman/pixman-ssse3.c $(PIXMAN_CONFIG)
 	$(CC) $(PIXMAN_CFLAGS) -mssse3 -c $< -o $@
 
 # jtl.o
-jtl.o: jtl.c $(CONFIG_HEADERS) | $(BUILD)/.protos-stamp $(BUILD)/pixman/pixman-version.h
+jtl.o: jtl.c $(CONFIG_HEADERS) | $(BUILD)/.protos-stamp $(BUILD)/pixman/pixman-version.h $(BUILD)/.wayland-stamp
 	$(CC) $(DWLCFLAGS) -c $< -o $@
 
 # ---- clean / install / dist ----
 
+# The Mesa sub-build takes ~15 minutes, so it survives a plain `make clean`;
+# `make clean mesa` throws it away as well. Since that spells two goals, the
+# mesa build target below is skipped whenever clean is one of them - otherwise
+# make would build Mesa again right after cleaning it.
+CLEAN_MESA := $(filter mesa,$(MAKECMDGOALS))
+# $(wildcard) skips dotfiles, and the build stamps in build/ are dotfiles, so
+# clean goes through find and leaves only the Mesa sub-build alone.
+ifeq ($(CLEAN_MESA),)
+CLEAN_MESA_EXCLUDE = ! -name $(notdir $(MESA_BUILD))
+else
+CLEAN_MESA_EXCLUDE =
+endif
+
 clean:
 	rm -f jtl jtl.o
-	rm -rf $(BUILD)
+	find $(BUILD) -mindepth 1 -maxdepth 1 $(CLEAN_MESA_EXCLUDE) -exec rm -rf {} +
 
 dist: clean
 	mkdir -p jtl-$(VERSION)
 	cp -R LICENSE* Makefile CHANGELOG.md README.md config.def.h \
 		config.mk protocols jtl.c jtl.desktop \
-		wlroots.build-files.txt wlroots libliftoff libdisplay-info pixman jtl-$(VERSION)
+		wlroots.build-files.txt wlroots libliftoff libdisplay-info pixman \
+		libwayland mesa jtl-$(VERSION)
 	tar -caf jtl-$(VERSION).tar.gz jtl-$(VERSION)
 	rm -rf jtl-$(VERSION)
 
@@ -435,6 +716,7 @@ install: jtl
 	mkdir -p $(DESTDIR)$(PREFIX)/bin
 	rm -f $(DESTDIR)$(PREFIX)/bin/jtl
 	cp -f jtl $(DESTDIR)$(PREFIX)/bin
+	$(STRIP) $(DESTDIR)$(PREFIX)/bin/jtl
 	chmod 755 $(DESTDIR)$(PREFIX)/bin/jtl
 	mkdir -p $(DESTDIR)$(DATADIR)/wayland-sessions
 	cp -f jtl.desktop $(DESTDIR)$(DATADIR)/wayland-sessions/jtl.desktop
@@ -444,4 +726,4 @@ uninstall:
 	rm -f $(DESTDIR)$(PREFIX)/bin/jtl \
 		$(DESTDIR)$(DATADIR)/wayland-sessions/jtl.desktop
 
-.PHONY: all clean dist install uninstall
+.PHONY: all clean dist install uninstall mesa

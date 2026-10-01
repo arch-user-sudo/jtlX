@@ -2925,8 +2925,9 @@ static void
 opacity_buffer(struct wlr_scene_buffer *buffer, int sx, int sy, void *user_data)
 {
 	float opacity = *(float *)user_data;
-	if (opacity >= 1.0f)
-		return;
+	/* Scene buffer opacity is sticky: it stays at the last value written
+	 * until it is overwritten. Always write it, including 1.0f, so buffers
+	 * left faded by a finished tween are restored to full opacity. */
 	wlr_scene_buffer_set_opacity(buffer, opacity);
 }
 
@@ -2950,7 +2951,8 @@ animateclient(Client *c)
 	int animating = 0;
 	float opacity = CLAMP(c->anim.alpha, 0.0f, 1.0f);
 	if (c->anim.x != c->geom.x || c->anim.y != c->geom.y
-			|| c->anim.w != c->geom.width || c->anim.h != c->geom.height)
+			|| c->anim.w != c->geom.width || c->anim.h != c->geom.height
+			|| opacity < 1.0f)
 		animating = 1;
 
 	wlr_scene_node_set_position(&c->scene->node,

@@ -1,14 +1,15 @@
 
-CFLAGS = -O2 -march=native -mtune=native -pipe -flto \
+CFLAGS = -O2 -march=native -mtune=native -pipe \
          -fomit-frame-pointer \
          -fstack-protector-strong -D_FORTIFY_SOURCE=2 -DNDEBUG \
          -ffunction-sections -fdata-sections
 
-LDFLAGS = -flto -Wl,--as-needed,--gc-sections
+LDFLAGS = -Wl,--as-needed,--gc-sections
 _VERSION = jtl-v.1.4
 VERSION  = `git describe --tags --dirty 2>/dev/null || echo $(_VERSION)`
 
 PKG_CONFIG = pkg-config
+STRIP = strip
 
 # paths
 PREFIX = /usr/local

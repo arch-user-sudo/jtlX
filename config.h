@@ -171,7 +171,7 @@ static const Arg startupapps[] = {
 	{ .v = (const char *[]){ "jtlab", NULL } },
 	{ .v = (const char *[]){ "foot", "--server", NULL } },
 	{ .v = (const char *[]){ "jthub", NULL } },
-	{ .v = (const char *[]){ "/usr/libexec/polkit-gnome-authentication-agent-1", NULL } },
+/*	{ .v = (const char *[]){ "/usr/libexec/polkit-gnome-authentication-agent-1", NULL } },*/
 
 };
 
