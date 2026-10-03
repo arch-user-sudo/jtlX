@@ -121,7 +121,8 @@ WAYLAND_OBJ = $(addprefix $(BUILD)/libwayland/,$(WAYLAND_SRC:%.c=%.o)) \
 	$(BUILD)/wayland/wayland-protocol.o
 CONFIG_HEADERS = $(BUILD)/include/config.h $(BUILD)/include/wlr/config.h $(BUILD)/include/wlr/version.h
 ALL_OBJS = $(WLR_OBJ) $(PROTO_OBJ) $(PNPID_OBJ) $(LIFTOFF_OBJ) $(DI_OBJ) \
-	$(PIXMAN_COM_OBJ) $(PIXMAN_SIMD_OBJ) $(WAYLAND_OBJ) $(LIBINPUT_OBJ)
+	$(PIXMAN_COM_OBJ) $(PIXMAN_SIMD_OBJ) $(WAYLAND_OBJ) $(LIBINPUT_OBJ) \
+	$(XKBCOMMON_OBJ) $(XKBCOMMON_PARSER_OBJ)
 
 # ---- Mesa (vendored, RadeonSI only) ----
 #
@@ -184,7 +185,7 @@ MESA_LIBS = -Wl,--start-group $$(find $(MESA_BUILD) -name '*.a') -Wl,--end-group
 # needed; libwayland still needs libffi, and so do we now)
 # libinput 1.32 parses evdev through libevdev (1.31.3 did its own), so the
 # vendored copy needs its headers and its library.
-PKGS = xkbcommon libevdev libdrm libffi libseat libudev $(XLIBS)
+PKGS = libevdev libdrm libffi libseat libudev $(XLIBS)
 # Mesa is vendored as well, so only its headers come from the system
 PKGS_HEADERS = egl glesv2 gbm
 # EGL/GLES/gbm headers come from the vendored Mesa so that they match the
@@ -212,7 +213,7 @@ WLRWARN = -Wundef -Wlogical-op -Wmissing-include-dirs -Wold-style-definition \
 WLRINCS = -I$(BUILD)/include -Iwlroots/include -I$(BUILD)/protocol -I$(BUILD)/shaders \
 	-I$(BUILD)/wayland -Ilibwayland/src \
 	-Ilibliftoff/include -Ilibdisplay-info/include -Ipixman -I$(BUILD)/pixman \
-	-I$(LIBINPUT_PUBLIC_INC) \
+	-I$(LIBINPUT_PUBLIC_INC) -I$(XKBCOMMON_PUBLIC_INC) \
 	$(PKG_CFLAGS)
 WLR_CFLAGS = $(WLRDEFS) $(WLRWARN) $(WLRINCS) $(CFLAGS)
 
@@ -256,6 +257,61 @@ LIBINPUT_INCS = -iquote $(BUILD)/libinput -I$(LIBINPUT_PUBLIC_INC) \
 # invariants, so it is dropped here rather than for the whole build.
 LIBINPUT_CFLAGS = $(LIBINPUT_INCS) $(PKG_CFLAGS) $(filter-out -DNDEBUG,$(CFLAGS))
 
+# Vendored xkbcommon 1.13.2, the same version Gentoo has installed, so the
+# behaviour jtl saw from the system library is unchanged. The tree holds only
+# what the library is built from: src/, include/, meson.build, meson_options.txt
+# and LICENSE. test/, tools/, doc/, bench/, fuzz/, scripts/, changes/, .github/
+# and every dotfile were never downloaded. This is the "same as wlroots"
+# treatment: sources compiled straight into jtl, no libxkbcommon.so.
+#
+# src/x11/ is deliberately absent — jtl is Wayland-only and the X11 backend is
+# disabled in the wlroots config, so libxkbcommon-x11 would be dead weight.
+
+XKBCOMMON_SRC := $(shell cat xkbcommon.build-files.txt)
+XKBCOMMON_OBJ = $(XKBCOMMON_SRC:%.c=$(BUILD)/xkbcommon/%.o)
+XKBCOMMON_VERSION := $(shell sed -n "s/.*version *: *'\([^']*\)'.*/\1/p" xkbcommon/meson.build | head -1)
+
+# xkbcommon source list — taken from upstream's own list rather than globbed,
+# so a file meson does not compile cannot sneak in, and the generated parser is
+# left out (it has its own rule below). Regenerate after updating xkbcommon:
+#   sed -n "/^libxkbcommon_sources = \[/,/^\]/p" xkbcommon/meson.build \
+#     | grep -oE "'src/[^']+\.c'" | tr -d "'" | sort > xkbcommon.build-files.txt
+
+# Sources include "config.h", which meson writes from an inline
+# configuration_data() block (there is no config.h.in in the tree), plus the
+# bison-generated parser.h, so both live under $(BUILD)/xkbcommon. The parser
+# is generated rather than compiled from the list, so it gets its own object.
+XKBCOMMON_PARSER = $(BUILD)/xkbcommon/src/xkbcomp/parser.c
+XKBCOMMON_PARSER_H = $(BUILD)/xkbcommon/src/xkbcomp/parser.h
+XKBCOMMON_PARSER_OBJ = $(BUILD)/xkbcommon/src/xkbcomp/parser.o
+XKBCOMMON_PUBLIC_HEADERS = \
+	$(BUILD)/xkbcommon/include/xkbcommon/xkbcommon.h \
+	$(BUILD)/xkbcommon/include/xkbcommon/xkbcommon-keysyms.h \
+	$(BUILD)/xkbcommon/include/xkbcommon/xkbcommon-compose.h \
+	$(BUILD)/xkbcommon/include/xkbcommon/xkbcommon-compat.h \
+	$(BUILD)/xkbcommon/include/xkbcommon/xkbcommon-names.h \
+	$(BUILD)/xkbcommon/include/xkbcommon/xkbregistry.h
+XKBCOMMON_GEN = $(BUILD)/xkbcommon/config.h \
+	$(XKBCOMMON_PARSER) $(XKBCOMMON_PARSER_H) $(XKBCOMMON_PUBLIC_HEADERS)
+
+# Laid out like an installed xkbcommon: just include/xkbcommon/*.h. The x11
+# header is left out to match the missing src/x11/. wlroots and jtl include
+# <xkbcommon/xkbcommon.h>, so this is all they ever see.
+XKBCOMMON_PUBLIC_INC = $(BUILD)/xkbcommon/include
+
+# -Ixkbcommon is not optional: a few sources include "src/utils.h" and
+# "src/messages-codes.h", i.e. paths relative to the xkbcommon root, which is
+# what meson's include_directories('.') gives upstream. The generated parser.h
+# is found through its own directory. No -Ixkbcommon/include: consumers get the
+# public dir instead, so a source cannot reach past the installed layout.
+XKBCOMMON_INCS = -I$(BUILD)/xkbcommon -I$(XKBCOMMON_PUBLIC_INC) \
+	-Ixkbcommon -Ixkbcommon/src -I$(BUILD)/xkbcommon/src/xkbcomp
+
+# xkbcommon asserts on its own invariants in keymap.c, state.c, text.c,
+# utils.h and utils-checked-arithmetic.h, so as with libinput, -DNDEBUG is
+# dropped for these sources only.
+XKBCOMMON_CFLAGS = $(XKBCOMMON_INCS) $(PKG_CFLAGS) $(filter-out -DNDEBUG,$(CFLAGS))
+
 # jtl.o compile flags
 DWLCPPFLAGS = -I. -DWLR_USE_UNSTABLE -D_POSIX_C_SOURCE=200809L \
 	-DVERSION=\"$(VERSION)\" $(XWAYLAND) $(FULLSCREEN_TEARING) \
@@ -268,7 +324,7 @@ DWLDEVCFLAGS = -Wpedantic -Wall -Wextra -Wdeclaration-after-statement \
 DWLCFLAGS = -Ipixman -I$(BUILD)/pixman \
 	$(PKG_CFLAGS) -I$(BUILD)/include -Iwlroots/include \
 	-I$(BUILD)/protocol -I$(BUILD)/wayland -Ilibwayland/src \
-	-I$(LIBINPUT_PUBLIC_INC) \
+	-I$(LIBINPUT_PUBLIC_INC) -I$(XKBCOMMON_PUBLIC_INC) \
 	$(DWLCPPFLAGS) $(DWLDEVCFLAGS) $(CFLAGS)
 
 LDLIBS = $(PKG_LIBS) $(MESA_LIBS) -lm -lpthread
@@ -623,6 +679,90 @@ $(BUILD)/libinput/include/libinput.h: libinput/src/libinput.h
 $(BUILD)/libinput/src/%.o: libinput/src/%.c $(LIBINPUT_GEN)
 	@mkdir -p $(@D)
 	$(CC) $(LIBINPUT_CFLAGS) -c $< -o $@
+
+# ---- xkbcommon ----
+
+# The XKBCOMMON_* variables live with the libinput ones above, before the jtl
+# rule: make expands a prerequisite list when it reads the rule, so a variable
+# defined further down would leave the objects off the prerequisite list while
+# still putting them on the link line.
+
+# config.h mirrors the configh_data block in xkbcommon/meson.build (lines
+# 166-305). Every HAVE_* below was probed with the compiler on this host rather
+# than assumed: glibc 2.43 and GCC 15 have all of them, except __secure_getenv,
+# which this glibc does not declare, so neither HAVE_SECURE_GETENV nor
+# HAVE___SECURE_GETENV is defined (meson tests the __-prefixed one first).
+#
+# The XKB data paths are what meson would bake in from the xkeyboard-config
+# pkg-config file. They follow the data on this machine (/usr/share/X11/xkb,
+# Gentoo prefix /usr) rather than meson's own /usr/local defaults: jtl reads the
+# system xkeyboard-config, so the extensions and locale paths have to sit
+# beside it too. DFLT_XKB_CONFIG_UNVERSIONED_EXTENSIONS_PATH is meson's
+# prefix/datadir fallback (meson.build:125-142) and DFLT_XKB_CONFIG_EXTRA_PATH is
+# its sysconfdir fallback, both moved from /usr/local to /usr for that reason.
+# LIBXKBCOMMON_TOOL_PATH only matters to xkbcli, which is not built here.
+#
+# Not defined, as upstream leaves them: the HAVE_XML_* and HAVE_ICU probes
+# (xkbcommon-x11 only), and every HAVE_XKBCLI_* / HAVE_TOOLS flag (tools).
+$(BUILD)/xkbcommon/config.h: xkbcommon/meson.build xkbcommon/meson_options.txt
+	@mkdir -p $(@D)
+	@printf '%s\n' \
+		'/* generated by the Makefile; see xkbcommon/meson.build */' \
+		'#define _GNU_SOURCE 1' \
+		'' \
+		'#define EXIT_INVALID_USAGE 2' \
+		'#define LIBXKBCOMMON_VERSION "$(XKBCOMMON_VERSION)"' \
+		'#define LIBXKBCOMMON_TOOL_PATH "/usr/local/libexec/xkbcommon"' \
+		'' \
+		'#define DFLT_XKB_LEGACY_ROOT ""' \
+		'#define DFLT_XKB_CONFIG_ROOT "/usr/share/X11/xkb"' \
+		'#define DFLT_XKB_CONFIG_UNVERSIONED_EXTENSIONS_PATH "/usr/share/xkeyboard-config.d"' \
+		'#define DFLT_XKB_CONFIG_VERSIONED_EXTENSIONS_PATH "/usr/share/X11/xkb.d"' \
+		'#define DFLT_XKB_CONFIG_EXTRA_PATH "/etc/xkb"' \
+		'#define XLOCALEDIR "/usr/share/X11/locale"' \
+		'' \
+		'#define DEFAULT_XKB_RULES "evdev"' \
+		'#define DEFAULT_XKB_MODEL "pc105"' \
+		'#define DEFAULT_XKB_LAYOUT "us"' \
+		'#define DEFAULT_XKB_VARIANT NULL' \
+		'#define DEFAULT_XKB_OPTIONS NULL' \
+		'' \
+		'#define HAVE_UNISTD_H 1' \
+		'#define HAVE_DIRENT_H 1' \
+		'#define HAVE_XKB_EXTENSIONS_DIRECTORIES 1' \
+		'#define HAVE___BUILTIN_EXPECT 1' \
+		'#define HAVE_EACCESS 1' \
+		'#define HAVE_EUIDACCESS 1' \
+		'#define HAVE_MMAP 1' \
+		'#define HAVE_MKOSTEMP 1' \
+		'#define HAVE_POSIX_FALLOCATE 1' \
+		'#define HAVE_STRNDUP 1' \
+		'#define HAVE_ASPRINTF 1' \
+		'#define HAVE_VASPRINTF 1' \
+		'#define HAVE_OPEN_MEMSTREAM 1' \
+		'#define HAVE_REAL_PATH 1' \
+		'#define HAVE_NEWLOCALE 1' \
+		'#define PATH_MAX 4096' \
+		> $@
+
+# meson.build:322-326 generates the xkbcomp parser with bison, prefix
+# _xkbcommon_ so its symbols cannot collide with the compose parser.
+$(XKBCOMMON_PARSER) $(XKBCOMMON_PARSER_H) &: xkbcommon/src/xkbcomp/parser.y
+	@mkdir -p $(@D)
+	bison --defines=$(XKBCOMMON_PARSER_H) -o $(XKBCOMMON_PARSER) \
+		-p _xkbcommon_ $<
+
+$(BUILD)/xkbcommon/include/xkbcommon/%.h: xkbcommon/include/xkbcommon/%.h
+	@mkdir -p $(@D)
+	ln -sf $(CURDIR)/$< $@
+
+$(BUILD)/xkbcommon/src/%.o: xkbcommon/src/%.c $(XKBCOMMON_GEN)
+	@mkdir -p $(@D)
+	$(CC) $(XKBCOMMON_CFLAGS) -c $< -o $@
+
+$(XKBCOMMON_PARSER_OBJ): $(XKBCOMMON_PARSER) $(XKBCOMMON_GEN)
+	@mkdir -p $(@D)
+	$(CC) $(XKBCOMMON_CFLAGS) -c $< -o $@
 
 # ---- pixman ----
 
