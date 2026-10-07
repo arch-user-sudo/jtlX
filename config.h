@@ -158,7 +158,7 @@ static const enum libinput_config_tap_button_map button_map = LIBINPUT_CONFIG_TA
 /* Programs launched by keybindings. These are null-terminated argv arrays. */
 static const char *termcmd[] = { "footclient", NULL };
 /*static const char *menucmd[] = { "bash", "/home/lynch/BashScripts/fuzzel.sh", NULL };*/
-static const char *filecmd[] = { "nemo", NULL };
+static const char *filecmd[] = { "thunar", NULL };
 static const char *startup[] = { "dwlservices", NULL };
 static const char *jtsearch [] = { "jtsearch", NULL };
 static const char *jtvolume [] = { "jtvolume", NULL };
@@ -170,7 +170,7 @@ static const Arg startupapps[] = {
 	{ .v = (const char *[]){ "gentoo-pipewire-launcher", NULL } },
 	{ .v = (const char *[]){ "jtlab", NULL } },
 	{ .v = (const char *[]){ "foot", "--server", NULL } },
-	{ .v = (const char *[]){ "jthub", NULL } },
+/*	{ .v = (const char *[]){ "jthub", NULL } },*/
 };
 
 

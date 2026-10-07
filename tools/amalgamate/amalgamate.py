@@ -243,8 +243,56 @@ def resolve(inc, curfile, quoted, dirs):
     return None
 
 
+COND_RE = re.compile(r'^\s*#\s*(if|ifdef|ifndef|elif|else|endif)\b(.*)')
+HAS_RE = re.compile(r'^\s*(!?)\s*(WLR_HAS_[A-Z0-9_]+)\s*(?:/[/*].*)?$')
+_features = None
+
+
+def build_features():
+    """WLR_HAS_* values from the generated wlr/config.h (cached)."""
+    global _features
+    if _features is None:
+        _features = {}
+        try:
+            with open(os.path.join(BUILD, 'include', 'wlr', 'config.h')) as fh:
+                for line in fh:
+                    m = re.match(r'\s*#\s*define\s+(WLR_HAS_\w+)\s+(\d+)', line)
+                    if m:
+                        _features[m.group(1)] = int(m.group(2))
+        except OSError:
+            pass
+    return _features
+
+
 def iter_includes(text):
+    """Yield (quote, name) for #include lines that can actually be compiled.
+
+    Includes inside a block guarded by a disabled `#if WLR_HAS_FOO` (or an
+    enabled `#if !WLR_HAS_FOO`) are skipped, so optional backends that are
+    turned off do not drag their headers (and system dependencies) in.  Any
+    other conditional is treated as active.
+    """
+    feats = build_features()
+    stack = []  # one bool per open #if: is the current branch live?
     for line in text.splitlines():
+        c = COND_RE.match(line)
+        if c:
+            kw, rest = c.group(1), c.group(2)
+            if kw in ('if', 'ifdef', 'ifndef'):
+                active = True
+                h = HAS_RE.match(rest) if kw == 'if' else None
+                if h and h.group(2) in feats:
+                    val = bool(feats[h.group(2)])
+                    active = (not val) if h.group(1) else val
+                stack.append(active)
+            elif kw in ('elif', 'else') and stack:
+                # An #else of a known-false branch is live, otherwise assume live.
+                stack[-1] = True
+            elif kw == 'endif' and stack:
+                stack.pop()
+            continue
+        if not all(stack):
+            continue
         m = INC_RE.match(line)
         if m:
             yield m.group(1), m.group(2)
