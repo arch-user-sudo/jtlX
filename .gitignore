@@ -1,0 +1,11 @@
+*.o
+jtl
+__pycache__/
+*.pyc
+.jtl-seed.c
+
+# Generated support files (protocol code, config headers, shaders, pnp.ids).
+# Only amalgamate.py recreates these, and only while wlroots/ still exists.
+# wlroots.c itself is NOT ignored: it is what lets the project build after
+# wlroots/ has been deleted, so consider committing it.
+build/
