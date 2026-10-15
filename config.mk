@@ -25,7 +25,7 @@ XWAYLAND = -DXWAYLAND
 XLIBS = xcb xcb-icccm
 
 # Uncomment to enable fullscreen tearing support (Mod+O enable, Mod+P disable)
-FULLSCREEN_TEARING = -DFULLSCREEN_TEARING
+#FULLSCREEN_TEARING = -DFULLSCREEN_TEARING
 
 # Uncomment to enable foreign toplevel management (for waybar, nwg-bar, etc.)
 FOREIGN_TOPLEVEL = -DFOREIGN_TOPLEVEL

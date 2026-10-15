@@ -41,7 +41,7 @@ static const float focuscolor[]            = COLOR(0x888888ff);
  * WARNING: negative values other than (-1, -1) cause problems with Xwayland.
  */
 static const MonitorRule monrules[] = {
-	{ "DP-1",       0.52f, 1,      1,        WL_OUTPUT_TRANSFORM_NORMAL,   0,     0  },
+	{ "HDMI-A-1",       0.52f, 1,      1,        WL_OUTPUT_TRANSFORM_NORMAL,   0,     0  },
 	{ "DVI-I-1",    0.5f,  1,      1,        WL_OUTPUT_TRANSFORM_NORMAL,   1000,  1102 },
 };
 
@@ -68,8 +68,8 @@ static const Rule rules[] = {
 /* ======================== GAPS ======================== */
 
 /* Outer gaps (between windows and screen edges) in pixels */
-static const unsigned int gappoh = 10;
-static const unsigned int gappov = 10;
+static const unsigned int gappoh = 5;
+static const unsigned int gappov = 15;
 /* Inner gaps (between tiled windows) in pixels */
 static const unsigned int gappih = 5;
 static const unsigned int gappiv = 5;
@@ -170,7 +170,7 @@ static const Arg startupapps[] = {
 	{ .v = (const char *[]){ "gentoo-pipewire-launcher", NULL } },
 	{ .v = (const char *[]){ "jtlab", NULL } },
 	{ .v = (const char *[]){ "foot", "--server", NULL } },
-/*	{ .v = (const char *[]){ "jthub", NULL } },*/
+	{ .v = (const char *[]){ "jthub", NULL } },
 };
 
 
