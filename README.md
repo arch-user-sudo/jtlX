@@ -1,4 +1,4 @@
-# jtl
+# jtlX
 
 > A super lightweight tiling Wayland compositor with just enough features to get you up and running — with **all of wlroots inlined into a single C file.**
 
