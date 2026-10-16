@@ -5,7 +5,7 @@ CFLAGS = -O2 -march=native -mtune=native -pipe \
          -ffunction-sections -fdata-sections -flto
 
 LDFLAGS = -Wl,--as-needed,--gc-sections -flto
-_VERSION = jtl-v.1.4
+_VERSION = jtl-v.0.2
 VERSION  = `git describe --tags --dirty 2>/dev/null || echo $(_VERSION)`
 
 PKG_CONFIG = pkg-config
