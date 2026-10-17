@@ -138,7 +138,6 @@ And `jtl.c` begins with `#include "wlroots.c"`, so when `jtl.c` is compiled the 
 | `build/` | Generated support files — config headers, protocol bindings, shader headers, `pnpids.c`. |
 | `config.mk` | **Build flags & feature toggles** (used by both `make` and `amalgamate.py`). |
 | `config.def.h` / `config.h` | Runtime behaviour — colors, monitor rules, window rules, key bindings. |
-| `protocols/` | Extra protocol XMLs used in earlier builds. |
 | `jtl.desktop` | Wayland session entry (`/usr/share/wayland-sessions/jtl.desktop`). |
 
 ---

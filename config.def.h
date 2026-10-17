@@ -140,6 +140,8 @@ static const Arg startupapps[] = {
  *   incnmaster(Arg)   - change number of master windows (.i = +/- 1)
  *   zoom(Arg)         - swap focused window with master
  *   setcursorshape    - set pointer cursor shape
+ *   showmouse(Arg)    - show mouse cursor
+ *   hidemouse(Arg)    - hide mouse cursor
  *   quit(Arg)         - exit dwl
  *   chvt(Arg)         - switch virtual terminal (.ui = VT number)
  */
@@ -163,6 +165,8 @@ static const Key keys[] = {
 	{ MODKEY,                        XKB_KEY_o,           enabletearing,    {0} },
 	{ MODKEY,                        XKB_KEY_p,           disabletearing,   {0} },
 #endif
+	{ MODKEY,                        XKB_KEY_m,           showmouse,        {0} },
+	{ MODKEY,                        XKB_KEY_n,           hidemouse,         {0} },
 	{ MODKEY,                        XKB_KEY_comma,       focusmon,         {.i = WLR_DIRECTION_UP} },
 	{ MODKEY,                        XKB_KEY_period,      focusmon,         {.i = WLR_DIRECTION_DOWN} },
 	{ MODKEY|WLR_MODIFIER_SHIFT,     XKB_KEY_less,        tagmon,           {.i = WLR_DIRECTION_UP} },

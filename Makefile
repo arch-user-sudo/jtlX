@@ -49,7 +49,7 @@ clean:
 dist: clean
 	mkdir -p jtl-$(VERSION)
 	cp -R LICENSE* Makefile CHANGELOG.md README.md config.def.h \
-		config.mk protocols jtl.c wlroots.c amalgamate.py scan.py jtl.desktop \
+		config.mk jtl.c wlroots.c amalgamate.py scan.py jtl.desktop \
 		jtl-$(VERSION)
 	tar -caf jtl-$(VERSION).tar.gz jtl-$(VERSION)
 	rm -rf jtl-$(VERSION)

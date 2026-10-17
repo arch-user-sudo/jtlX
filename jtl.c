@@ -300,6 +300,8 @@ static int deactivateold(struct wlr_surface *old, Client *old_c,
 static void run(void);
 static void setcursor(struct wl_listener *listener, void *data);
 static void setcursorshape(struct wl_listener *listener, void *data);
+static void showmouse(const Arg *arg);
+static void hidemouse(const Arg *arg);
 static void setfullscreen(Client *c, int fullscreen);
 static void setmfact(const Arg *arg);
 static void setmon(Client *c, Monitor *m, uint32_t newtags);
@@ -1324,6 +1326,18 @@ setcursorshape(struct wl_listener *listener, void *data)
 	if (event->seat_client == seat->pointer_state.focused_client)
 		wlr_cursor_set_xcursor(cursor, cursor_mgr,
 				wlr_cursor_shape_v1_name(event->shape));
+}
+
+static void
+showmouse(const Arg *arg)
+{
+	wlr_cursor_set_xcursor(cursor, cursor_mgr, "default");
+}
+
+static void
+hidemouse(const Arg *arg)
+{
+	wlr_cursor_unset_image(cursor);
 }
 
 static void
@@ -2510,8 +2524,8 @@ setfullscreen(Client *c, int fullscreen)
 {
 	if (!c || !c->mon || !client_surface(c)->mapped)
 		return;
-	if (fullscreen && c->isfloating)
-		return;
+/*	if (fullscreen && c->isfloating)
+		return;*/
 	if (c->isfullscreen == fullscreen)
 		return;
 
