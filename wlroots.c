@@ -6,7 +6,7 @@
  * jtl.c includes this file; regenerate with `make amalgamate`
  * (only possible while wlroots/ still exists).
  *
- * features from config.mk: FOREIGN_TOPLEVEL WORKSPACES XWAYLAND _FORTIFY_SOURCE
+ * features from config.mk: FOREIGN_TOPLEVEL FULLSCREEN_TEARING WORKSPACES XWAYLAND _FORTIFY_SOURCE
  */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE 1
@@ -108800,18 +108800,44 @@ static struct wlr_output_configuration_v1 *WLR_types_wlr_output_management_v1_c_
 	return wl_resource_get_user_data(resource);
 }
 
-// Checks that the head is unconfigured (ie. no enable_head/disable_head request
-// has yet been sent for this head), if not sends a protocol error.
-static bool WLR_types_wlr_output_management_v1_c_config_check_head_is_unconfigured(
+static struct wlr_output_configuration_head_v1 *WLR_types_wlr_output_management_v1_c_configuration_get_head(
 		struct wlr_output_configuration_v1 *config, struct wlr_output *output) {
 	struct wlr_output_configuration_head_v1 *head;
 	wl_list_for_each(head, &config->heads, link) {
 		if (head->state.output == output) {
-			wl_resource_post_error(config->resource,
-				ZWLR_OUTPUT_CONFIGURATION_V1_ERROR_ALREADY_CONFIGURED_HEAD,
-				"head has already been configured");
-			return false;
+			return head;
 		}
+	}
+	return NULL;
+}
+
+// Checks that the head is unconfigured (ie. no enable_head/disable_head request
+// has yet been sent for this head), if not sends a protocol error.
+static bool WLR_types_wlr_output_management_v1_c_config_check_head_is_unconfigured(
+		struct wlr_output_configuration_v1 *config, struct wlr_output *output) {
+	struct wlr_output_configuration_head_v1 *head =
+		WLR_types_wlr_output_management_v1_c_configuration_get_head(config, output);
+	if (head != NULL) {
+		wl_resource_post_error(config->resource,
+			ZWLR_OUTPUT_CONFIGURATION_V1_ERROR_ALREADY_CONFIGURED_HEAD,
+			"head has already been configured");
+		return false;
+	}
+	return true;
+}
+
+static bool WLR_types_wlr_output_management_v1_c_config_check_all_heads_configured(
+		struct wlr_output_configuration_v1 *config) {
+	struct wlr_output_head_v1 *head;
+	wl_list_for_each(head, &config->manager->heads, link) {
+		if (WLR_types_wlr_output_management_v1_c_configuration_get_head(config, head->state.output) != NULL) {
+			continue;
+		}
+
+		wl_resource_post_error(config->resource,
+			ZWLR_OUTPUT_CONFIGURATION_V1_ERROR_UNCONFIGURED_HEAD,
+			"head '%s' has not been configured", head->state.output->name);
+		return false;
 	}
 	return true;
 }
@@ -108932,11 +108958,14 @@ static void WLR_types_wlr_output_management_v1_c_config_handle_apply(struct wl_c
 		return;
 	}
 
-	WLR_types_wlr_output_management_v1_c_config_finalize(config);
 	if (!WLR_types_wlr_output_management_v1_c_config_validate_serial(config)) {
 		return;
 	}
+	if (!WLR_types_wlr_output_management_v1_c_config_check_all_heads_configured(config)) {
+		return;
+	}
 
+	WLR_types_wlr_output_management_v1_c_config_finalize(config);
 	wl_signal_emit_mutable(&config->manager->events.apply, config);
 }
 
@@ -108951,11 +108980,14 @@ static void WLR_types_wlr_output_management_v1_c_config_handle_test(struct wl_cl
 		return;
 	}
 
-	WLR_types_wlr_output_management_v1_c_config_finalize(config);
 	if (!WLR_types_wlr_output_management_v1_c_config_validate_serial(config)) {
 		return;
 	}
+	if (!WLR_types_wlr_output_management_v1_c_config_check_all_heads_configured(config)) {
+		return;
+	}
 
+	WLR_types_wlr_output_management_v1_c_config_finalize(config);
 	wl_signal_emit_mutable(&config->manager->events.test, config);
 }
 
@@ -109156,17 +109188,6 @@ struct wlr_output_manager_v1 *wlr_output_manager_v1_create(
 	wl_display_add_destroy_listener(display, &manager->display_destroy);
 
 	return manager;
-}
-
-static struct wlr_output_configuration_head_v1 *WLR_types_wlr_output_management_v1_c_configuration_get_head(
-		struct wlr_output_configuration_v1 *config, struct wlr_output *output) {
-	struct wlr_output_configuration_head_v1 *head;
-	wl_list_for_each(head, &config->heads, link) {
-		if (head->state.output == output) {
-			return head;
-		}
-	}
-	return NULL;
 }
 
 static void WLR_types_wlr_output_management_v1_c_send_mode_state(struct wl_resource *mode_resource,
