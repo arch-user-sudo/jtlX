@@ -10,7 +10,7 @@
 /* ======================== APPEARANCE ======================== */
 
 /* Border width in pixels around each window */
-static const unsigned int borderpx         = 1;
+static const int borderpx                 = 1;
 /* Background color of the desktop (root window) */
 static const float rootcolor[]             = COLOR(0x0F1011ff);
 /* Border color of unfocused windows */
@@ -66,11 +66,11 @@ static const Rule rules[] = {
 /* ======================== GAPS ======================== */
 
 /* Outer gaps (between windows and screen edges) in pixels */
-static const unsigned int gappoh = 10;
-static const unsigned int gappov = 10;
+static const int gappoh = 10;
+static const int gappov = 10;
 /* Inner gaps (between tiled windows) in pixels */
-static const unsigned int gappih = 5;
-static const unsigned int gappiv = 5;
+static const int gappih = 5;
+static const int gappiv = 5;
 
 
 /* ======================== WINDOW ANIMATIONS ======================== */

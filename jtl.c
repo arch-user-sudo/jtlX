@@ -42,17 +42,17 @@
 #define MAX(A, B)               ((A) > (B) ? (A) : (B))
 #define MIN(A, B)               ((A) < (B) ? (A) : (B))
 #define CLAMP(X, L, H)          (MIN(MAX((X), (L)), (H)))
-#define CLEANMASK(mask)         ((mask) & ~WLR_MODIFIER_CAPS)
+#define CLEANMASK(mask)         ((mask) & ~(uint32_t)WLR_MODIFIER_CAPS)
 #define VISIBLEON(C, M)         ((M) && (C)->mon == (M) && ((C)->tags & (M)->tagset[(M)->seltags]))
-#define LENGTH(X)               (sizeof X / sizeof X[0])
+#define LENGTH(X)               (sizeof (X) / sizeof (X)[0])
 #define END(A)                  ((A) + LENGTH(A))
 #define TAGMASK                 ((1u << TAGCOUNT) - 1)
 #define LISTEN(E, L, H)         wl_signal_add((E), ((L)->notify = (H), (L)))
 #define LISTEN_STATIC(E, H)     do { struct wl_listener *_l = ecalloc(1, sizeof(*_l)); _l->notify = (H); wl_signal_add((E), _l); } while (0)
 
-void die(const char *fmt, ...);
-void *ecalloc(size_t nmemb, size_t size);
-int fd_set_nonblock(int fd);
+static void die(const char *fmt, ...);
+static void *ecalloc(size_t nmemb, size_t size);
+static int fd_set_nonblock(int fd);
 
 enum { CurNormal, CurPressed };
 enum { XDGShell, LayerShell, X11 };
@@ -84,7 +84,7 @@ typedef struct {
 
 typedef struct {
 
-	unsigned int type;
+	int type;
 	int pending_fullscreen;
 
 	Monitor *mon;
@@ -92,7 +92,7 @@ typedef struct {
 	struct wlr_scene_rect *border[4];
 	struct wlr_scene_tree *scene_surface;
 	struct wlr_box geom;
-	unsigned int bw;
+	int bw;
 	uint32_t tags;
 	int isfloating;
 	int isfullscreen;
@@ -352,7 +352,7 @@ static void client_send_close(Client *c);
 static void client_set_border_color(Client *c, const float color[static 4]);
 static void client_set_fullscreen(Client *c, int fullscreen);
 static void client_set_scale(struct wlr_surface *s, int32_t scale);
-static uint32_t client_set_size(Client *c, uint32_t width, uint32_t height);
+static uint32_t client_set_size(Client *c, int32_t width, int32_t height);
 static void client_set_tiled(Client *c, uint32_t edges);
 static void client_set_suspended(Client *c, int suspended);
 static int client_wants_focus(Client *c);
@@ -394,8 +394,8 @@ static struct wlr_foreign_toplevel_manager_v1 *toplevel_manager;
 
 #ifdef WORKSPACES
 #define EXT_WORKSPACE_ENABLE_CAPS \
-	EXT_WORKSPACE_HANDLE_V1_WORKSPACE_CAPABILITIES_ACTIVATE | \
-	EXT_WORKSPACE_HANDLE_V1_WORKSPACE_CAPABILITIES_DEACTIVATE
+	(EXT_WORKSPACE_HANDLE_V1_WORKSPACE_CAPABILITIES_ACTIVATE | \
+	EXT_WORKSPACE_HANDLE_V1_WORKSPACE_CAPABILITIES_DEACTIVATE)
 
 struct JtlWorkspace {
 	struct wl_list link;
@@ -1797,7 +1797,7 @@ xwaylandready(struct wl_listener *listener, void *data)
 
 	if ((xcursor = wlr_xcursor_manager_get_xcursor(cursor_mgr, "default", 1)))
 		wlr_xwayland_set_cursor(xwayland, wlr_xcursor_image_get_buffer(xcursor->images[0]),
-				xcursor->images[0]->hotspot_x, xcursor->images[0]->hotspot_y);
+				(int32_t)xcursor->images[0]->hotspot_x, (int32_t)xcursor->images[0]->hotspot_y);
 }
 #endif
 
@@ -1915,19 +1915,20 @@ client_set_bounds(Client *c, int32_t width, int32_t height)
 }
 
 static uint32_t
-client_set_size(Client *c, uint32_t width, uint32_t height)
+client_set_size(Client *c, int32_t width, int32_t height)
 {
 #ifdef XWAYLAND
 	if (client_is_x11(c)) {
 		wlr_xwayland_surface_configure(c->surface.xwayland,
-				c->geom.x + c->bw, c->geom.y + c->bw, width, height);
+				(int16_t)(c->geom.x + c->bw), (int16_t)(c->geom.y + c->bw),
+				(uint16_t)width, (uint16_t)height);
 		return 0;
 	}
 #endif
-	if ((int32_t)width == c->surface.xdg->toplevel->current.width
-			&& (int32_t)height == c->surface.xdg->toplevel->current.height)
+	if (width == c->surface.xdg->toplevel->current.width
+			&& height == c->surface.xdg->toplevel->current.height)
 		return 0;
-	return wlr_xdg_toplevel_set_size(c->surface.xdg->toplevel, (int32_t)width, (int32_t)height);
+	return wlr_xdg_toplevel_set_size(c->surface.xdg->toplevel, width, height);
 }
 
 static void
@@ -2215,7 +2216,8 @@ resize(Client *c, struct wlr_box geo)
 
 	if (old.x != c->geom.x || old.y != c->geom.y
 			|| old.width != c->geom.width || old.height != c->geom.height) {
-		tween_start(c, c->geom.x, c->geom.y, c->geom.width, c->geom.height, 1.0);
+		tween_start(c, (float)c->geom.x, (float)c->geom.y,
+				(float)c->geom.width, (float)c->geom.height, 1.0f);
 		wlr_output_schedule_frame(c->mon->wlr_output);
 	}
 
@@ -2245,10 +2247,12 @@ tile(Monitor *m)
 	}
 	ie = 1;
 
-	if (n > m->nmaster)
-		mw = m->nmaster ? (int)((m->w.width - 2 * OUTER_GAP_H * oe
-				- INNER_GAP_H * ie) * m->mfact + INNER_GAP_H * ie + 0.5f) : 0;
-	else
+	if (n > m->nmaster) {
+		float g = 2.0f * (float)OUTER_GAP_H * (float)oe;  /* outer gap pair */
+		float gi = (float)(INNER_GAP_H * ie);
+		mw = m->nmaster ? (int)(((float)m->w.width - g - gi) * m->mfact
+				+ gi + 0.5f) : 0;
+	} else
 		mw = m->w.width - 2 * OUTER_GAP_H * oe + INNER_GAP_H * ie;
 
 	i = 0;
@@ -2402,8 +2406,8 @@ commitnotify(struct wl_listener *listener, void *data)
 			if (old.x != c->geom.x || old.y != c->geom.y
 					|| old.width != c->geom.width
 					|| old.height != c->geom.height) {
-				tween_start(c, c->geom.x, c->geom.y,
-						c->geom.width, c->geom.height, 1.0);
+				tween_start(c, (float)c->geom.x, (float)c->geom.y,
+						(float)c->geom.width, (float)c->geom.height, 1.0f);
 				wlr_output_schedule_frame(c->mon->wlr_output);
 			}
 		}
@@ -2465,7 +2469,8 @@ movefloat(Client *c, Monitor *m)
 	applybounds(c, &m->w);
 	client_set_size(c, c->geom.width - 2 * c->bw,
 			c->geom.height - 2 * c->bw);
-	tween_start(c, c->geom.x, c->geom.y, c->geom.width, c->geom.height, 1.0);
+	tween_start(c, (float)c->geom.x, (float)c->geom.y,
+			(float)c->geom.width, (float)c->geom.height, 1.0f);
 	wlr_output_schedule_frame(m->wlr_output);
 }
 
@@ -2567,8 +2572,8 @@ startclientanim(Client *c)
 	if (c->isfloating)
 		centerfloat(c);
 	arrange(c->mon);
-	c->anim.w = c->geom.width;
-	c->anim.h = c->geom.height;
+	c->anim.w = (float)c->geom.width;
+	c->anim.h = (float)c->geom.height;
 	if (c->isfloating) {
 		slide_dir = 3;
 	} else if (c->geom.width >= c->mon->w.width - 2 * (int)c->bw) {
@@ -2589,18 +2594,19 @@ startclientanim(Client *c)
 	}
 
 	switch (slide_dir) {
-	case 0: start_x = c->mon->m.x - c->geom.width;  start_y = c->geom.y; break;
-	case 1: start_x = c->mon->m.x + c->mon->m.width; start_y = c->geom.y; break;
-	case 2: start_x = c->geom.x; start_y = c->mon->m.y - c->geom.height; break;
+	case 0: start_x = (float)(c->mon->m.x - c->geom.width);  start_y = (float)c->geom.y; break;
+	case 1: start_x = (float)(c->mon->m.x + c->mon->m.width); start_y = (float)c->geom.y; break;
+	case 2: start_x = (float)c->geom.x; start_y = (float)(c->mon->m.y - c->geom.height); break;
 	case 3:
-	default: start_x = c->geom.x; start_y = c->mon->m.y + c->mon->m.height; break;
+	default: start_x = (float)c->geom.x; start_y = (float)(c->mon->m.y + c->mon->m.height); break;
 	}
 	wlr_scene_node_set_position(&c->scene->node,
 			(int)(start_x + 0.5), (int)(start_y + 0.5));
 	c->anim.x = start_x;
 	c->anim.y = start_y;
 	c->anim.alpha = ANIM_ALPHA_START;
-	tween_start(c, c->geom.x, c->geom.y, c->geom.width, c->geom.height, 1.0f);
+	tween_start(c, (float)c->geom.x, (float)c->geom.y,
+			(float)c->geom.width, (float)c->geom.height, 1.0f);
 	wlr_output_schedule_frame(c->mon->wlr_output);
 }
 
@@ -2697,10 +2703,10 @@ mapnotify(struct wl_listener *listener, void *data)
 	}
 	c->geom.width += 2 * c->bw;
 	c->geom.height += 2 * c->bw;
-	c->anim.x = c->geom.x;
-	c->anim.y = c->geom.y;
-	c->anim.w = c->geom.width;
-	c->anim.h = c->geom.height;
+	c->anim.x = (float)c->geom.x;
+	c->anim.y = (float)c->geom.y;
+	c->anim.w = (float)c->geom.width;
+	c->anim.h = (float)c->geom.height;
 	c->anim.alpha = 1.0f;
 	setfloat(c);
 	if (!c->isfloating)
@@ -3012,7 +3018,7 @@ tween_run(void)
 			continue;
 
 		progress = dur_ns > 0
-				? (double)(now_ns - c->anim.start_time) / dur_ns : 1.0;
+				? (double)(now_ns - c->anim.start_time) / (double)dur_ns : 1.0;
 
 		if (progress >= 1.0) {
 			c->anim.x = c->anim.to_x;
@@ -3119,7 +3125,7 @@ pointerfocus(Client *c, struct wlr_surface *surface, double sx, double sy,
 
 	if (!time) {
 		clock_gettime(CLOCK_MONOTONIC, &now);
-		time = now.tv_sec * 1000 + now.tv_nsec / 1000000;
+		time = (uint32_t)(now.tv_sec * 1000 + now.tv_nsec / 1000000);
 	}
 	wlr_seat_pointer_notify_enter(seat, surface, sx, sy);
 	wlr_seat_pointer_notify_motion(seat, time, sx, sy);
@@ -3352,7 +3358,7 @@ keypress(struct wl_listener *listener, void *data)
 	if (handled && group->wlr_group->keyboard.repeat_info.delay > 0) {
 		group->mods = mods;
 		group->keysym_count = nsyms < 32 ? nsyms : 32;
-		memcpy(group->keysym_buf, syms, group->keysym_count * sizeof(syms[0]));
+		memcpy(group->keysym_buf, syms, (size_t)group->keysym_count * sizeof(syms[0]));
 		wl_event_source_timer_update(group->key_repeat_source,
 				group->wlr_group->keyboard.repeat_info.delay);
 	} else {

@@ -2,15 +2,15 @@
  * Converts an ARGB hex color to a float array for wlroots.
  * Usage: COLOR(0xAARRGGBB)  e.g. COLOR(0xff0000ff) = opaque red
  */
-#define COLOR(hex)    { ((hex >> 24) & 0xFF) / 255.0f, \
-                        ((hex >> 16) & 0xFF) / 255.0f, \
-                        ((hex >> 8) & 0xFF) / 255.0f, \
-                        (hex & 0xFF) / 255.0f }
+#define COLOR(hex)    { (((hex) >> 24) & 0xFF) / 255.0f, \
+                        (((hex) >> 16) & 0xFF) / 255.0f, \
+                        (((hex) >> 8) & 0xFF) / 255.0f, \
+                        ((hex) & 0xFF) / 255.0f }
 
 /* ======================== APPEARANCE ======================== */
 
 /* Border width in pixels around each window */
-static const unsigned int borderpx         = 1;
+static const int borderpx                 = 1;
 /* Background color of the desktop (root window) */
 static const float rootcolor[]             = COLOR(0x0F1011ff);
 /* Border color of unfocused windows */
@@ -70,11 +70,11 @@ static const Rule rules[] = {
 /* ======================== GAPS ======================== */
 
 /* Outer gaps (between windows and screen edges) in pixels */
-static const unsigned int gappoh = 5;
-static const unsigned int gappov = 15;
+static const int gappoh = 5;
+static const int gappov = 15;
 /* Inner gaps (between tiled windows) in pixels */
-static const unsigned int gappih = 5;
-static const unsigned int gappiv = 5;
+static const int gappih = 5;
+static const int gappiv = 5;
 
 
 /* ======================== WINDOW ANIMATIONS ======================== */
@@ -147,8 +147,8 @@ static const enum libinput_config_tap_button_map button_map = LIBINPUT_CONFIG_TA
  *   Mod+Shift+Key = move focused window to that tag
  */
 #define TAGKEYS(KEY,SHIFTKEY,TAG) \
-	{ MODKEY,                    KEY,            view,            {.ui = 1 << TAG} }, \
-	{ MODKEY|WLR_MODIFIER_SHIFT, SHIFTKEY,      tag,             {.ui = 1 << TAG} }
+	{ MODKEY,                    KEY,            view,            {.ui = 1 << (TAG)} }, \
+	{ MODKEY|WLR_MODIFIER_SHIFT, SHIFTKEY,      tag,             {.ui = 1 << (TAG)} }
 
 /* SHCMD: spawn a shell command.
  * Usage: SHCMD("firefox")  expands to { .v = (char*[]){ "/bin/sh", "-c", "firefox", NULL } }
