@@ -28,6 +28,29 @@ LDLIBS    = `$(PKG_CONFIG) --libs $(PKGS)` $(WLR_LIBS) -lm $(LIBS)
 AMALG = amalgamate.py
 SCAN  = scan.py
 
+# clang-tidy auto-fix pass run on wlroots.c right after it is regenerated and
+# before anything compiles it.  Only checks with safe, semantics-preserving
+# fix-its are enabled; the big conversion checks (-Wconversion etc.) have no
+# auto-fixes and are deliberately absent.  Skipped automatically if clang-tidy
+# is not installed.  Set TIDY= (empty) to disable.
+TIDY        = clang-tidy
+TIDY_CHECKS = -*,bugprone-macro-parentheses,bugprone-macro-repeated-side-effects,performance-type-promotion-in-math-fn,readability-inconsistent-declaration-parameter-name
+
+# Canned recipe: the clang-tidy auto-fix pass (used by both wlroots.c rules).
+# header-filter matches nothing on purpose: wlroots.c is self-contained (all
+# project headers are inlined into it), so fixes must land in wlroots.c itself
+# and never in system headers like pixman.h or drm_fourcc.h.
+define tidy_wlroots
+	@if [ -n "$(TIDY)" ] && command -v $(TIDY) >/dev/null 2>&1; then \
+		echo "clang-tidy: auto-fixing wlroots.c"; \
+		$(TIDY) -quiet -fix -checks='$(TIDY_CHECKS)' \
+			--header-filter='a^' wlroots.c -- \
+			$(DWLCPPFLAGS) `$(PKG_CONFIG) --cflags $(PKGS)` || exit 1; \
+	else \
+		echo "clang-tidy not found; skipping wlroots.c auto-fix pass"; \
+	fi
+endef
+
 all: jtl
 jtl: jtl.o
 	$(CC) jtl.o $(DWLCFLAGS) $(LDFLAGS) $(LDLIBS) -o $@
@@ -35,10 +58,17 @@ jtl.o: jtl.c wlroots.c config.h config.mk
 
 wlroots.c: jtl.c config.mk $(AMALG) $(SCAN)
 	python3 $(AMALG)
+	$(tidy_wlroots)
+
+# Re-run the tidy auto-fix pass on the existing wlroots.c without regenerating.
+tidy-wlroots: wlroots.c
+	$(TIDY) -quiet -fix -checks='$(TIDY_CHECKS)' wlroots.c -- \
+		$(DWLCPPFLAGS) `$(PKG_CONFIG) --cflags $(PKGS)`
 
 # Force a regeneration even if wlroots.c looks up to date.
 amalgamate:
 	python3 $(AMALG)
+	$(tidy_wlroots)
 
 config.h:
 	cp config.def.h $@
@@ -66,7 +96,7 @@ uninstall:
 	rm -f $(DESTDIR)$(PREFIX)/bin/jtl \
 		$(DESTDIR)$(DATADIR)/wayland-sessions/jtl.desktop
 
-.PHONY: all clean amalgamate install uninstall dist
+.PHONY: all clean amalgamate tidy-wlroots install uninstall dist
 
 .SUFFIXES: .c .o
 .c.o:

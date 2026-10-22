@@ -6,7 +6,7 @@
  * jtl.c includes this file; regenerate with `make amalgamate`
  * (only possible while wlroots/ still exists).
  *
- * features from config.mk: FOREIGN_TOPLEVEL FULLSCREEN_TEARING WORKSPACES XWAYLAND _FORTIFY_SOURCE
+ * features from config.mk: FOREIGN_TOPLEVEL WORKSPACES XWAYLAND _FORTIFY_SOURCE
  */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE 1
@@ -54318,7 +54318,7 @@ struct xwayland_surface_v1_interface {
 
 /* ===== protocol: build/backend/drm/pnpids.c ===== */
 
-#define PNP_ID(a, b, c) ((a & 0x1f) << 10) | ((b & 0x1f) << 5) | (c & 0x1f)
+#define PNP_ID(a, b, c) ((((a) & 0x1f) << 10) | (((b) & 0x1f) << 5) | ((c) & 0x1f))
 const char *get_pnp_manufacturer(const char code[static 3]) {
 	switch (PNP_ID(code[0], code[1], code[2])) {
 	case PNP_ID('A', 'A', 'A'): return "Avolites Ltd";
@@ -83764,7 +83764,7 @@ static void WLR_types_output_output_c_send_scale(struct wl_resource *resource) {
 	struct wlr_output *output = wlr_output_from_resource(resource);
 	uint32_t version = wl_resource_get_version(resource);
 	if (version >= WL_OUTPUT_SCALE_SINCE_VERSION) {
-		wl_output_send_scale(resource, (uint32_t)ceil(output->scale));
+		wl_output_send_scale(resource, (uint32_t)ceilf(output->scale));
 	}
 }
 
@@ -86879,7 +86879,7 @@ static uint32_t WLR_types_scene_wlr_scene_c_region_area(const pixman_region32_t 
 static void WLR_types_scene_wlr_scene_c_scale_region(pixman_region32_t *region, float scale, bool round_up) {
 	wlr_region_scale(region, region, scale);
 
-	if (round_up && floor(scale) != scale) {
+	if (round_up && floorf(scale) != scale) {
 		wlr_region_expand(region, region, 1);
 	}
 }
@@ -86912,14 +86912,14 @@ static void WLR_types_scene_wlr_scene_c_output_to_buffer_coords(pixman_region32_
 }
 
 static int WLR_types_scene_wlr_scene_c_scale_length(int length, int offset, float scale) {
-	return round((offset + length) * scale) - round(offset * scale);
+	return roundf((offset + length) * scale) - roundf(offset * scale);
 }
 
 static void WLR_types_scene_wlr_scene_c_scale_box(struct wlr_box *box, float scale) {
 	box->width = WLR_types_scene_wlr_scene_c_scale_length(box->width, box->x, scale);
 	box->height = WLR_types_scene_wlr_scene_c_scale_length(box->height, box->y, scale);
-	box->x = round(box->x * scale);
-	box->y = round(box->y * scale);
+	box->x = roundf(box->x * scale);
+	box->y = roundf(box->y * scale);
 }
 
 static void WLR_types_scene_wlr_scene_c_transform_output_box(struct wlr_box *box, const struct render_data *data) {
@@ -87568,9 +87568,9 @@ void wlr_scene_buffer_set_buffer_with_options(struct wlr_scene_buffer *scene_buf
 		// integer numbers; ceilf() is used to ensure that the distance is at least 1.
 		float buffer_scale_x = 1.0f / output_scale_x;
 		float buffer_scale_y = 1.0f / output_scale_y;
-		int dist_x = floor(buffer_scale_x) != buffer_scale_x ?
+		int dist_x = floorf(buffer_scale_x) != buffer_scale_x ?
 			(int)ceilf(output_scale_x / 2.0f) : 0;
-		int dist_y = floor(buffer_scale_y) != buffer_scale_y ?
+		int dist_y = floorf(buffer_scale_y) != buffer_scale_y ?
 			(int)ceilf(output_scale_y / 2.0f) : 0;
 		// TODO: expand with per-axis distances
 		wlr_region_expand(&output_damage, &output_damage,
@@ -87585,8 +87585,8 @@ void wlr_scene_buffer_set_buffer_with_options(struct wlr_scene_buffer *scene_buf
 		pixman_region32_fini(&cull_region);
 
 		pixman_region32_translate(&output_damage,
-			(int)round((lx - scene_output->x) * output_scale),
-			(int)round((ly - scene_output->y) * output_scale));
+			(int)roundf((lx - scene_output->x) * output_scale),
+			(int)roundf((ly - scene_output->y) * output_scale));
 		WLR_types_scene_wlr_scene_c_output_to_buffer_coords(&output_damage, scene_output->output);
 		WLR_types_scene_wlr_scene_c_scene_output_damage(scene_output, &output_damage);
 		pixman_region32_fini(&output_damage);
@@ -88932,7 +88932,7 @@ bool wlr_scene_output_build_state(struct wlr_scene_output *scene_output,
 		.render_list = &scene_output->render_list,
 		.calculate_visibility = scene_output->scene->calculate_visibility,
 		.highlight_transparent_region = scene_output->scene->highlight_transparent_region,
-		.fractional_scale = floor(render_data.scale) != render_data.scale,
+		.fractional_scale = floorf(render_data.scale) != render_data.scale,
 	};
 
 	list_con.render_list->size = 0;
@@ -89111,7 +89111,7 @@ bool wlr_scene_output_build_state(struct wlr_scene_output *scene_output,
 			pixman_region32_fini(&opaque);
 		}
 
-		if (floor(render_data.scale) != render_data.scale) {
+		if (floorf(render_data.scale) != render_data.scale) {
 			wlr_region_expand(&background, &background, 1);
 
 			// reintersect with the damage because we never want to render
@@ -93715,7 +93715,7 @@ static void WLR_types_wlr_color_management_v1_c_resource_handle_destroy(struct w
 }
 
 static int32_t WLR_types_wlr_color_management_v1_c_encode_cie1931_coord(float value) {
-	return round(value * 1000 * 1000);
+	return roundf(value * 1000 * 1000);
 }
 
 static float WLR_types_wlr_color_management_v1_c_decode_cie1931_coord(int32_t raw) {
@@ -93805,8 +93805,8 @@ static void WLR_types_wlr_color_management_v1_c_image_desc_handle_get_informatio
 		WLR_types_wlr_color_management_v1_c_encode_cie1931_coord(primaries.white.x), WLR_types_wlr_color_management_v1_c_encode_cie1931_coord(primaries.white.y));
 	wp_image_description_info_v1_send_tf_named(resource, image_desc->data.tf_named);
 	wp_image_description_info_v1_send_luminances(resource,
-		round(luminances.min * 10000), round(luminances.max),
-		round(luminances.reference));
+		roundf(luminances.min * 10000), roundf(luminances.max),
+		roundf(luminances.reference));
 	// TODO: send mastering display primaries and luminances here when we add
 	// support for features.set_mastering_display_primaries
 	wp_image_description_info_v1_send_target_primaries(resource,
@@ -93815,7 +93815,7 @@ static void WLR_types_wlr_color_management_v1_c_image_desc_handle_get_informatio
 		WLR_types_wlr_color_management_v1_c_encode_cie1931_coord(primaries.blue.x), WLR_types_wlr_color_management_v1_c_encode_cie1931_coord(primaries.blue.y),
 		WLR_types_wlr_color_management_v1_c_encode_cie1931_coord(primaries.white.x), WLR_types_wlr_color_management_v1_c_encode_cie1931_coord(primaries.white.y));
 	wp_image_description_info_v1_send_target_luminance(resource,
-		round(luminances.min * 10000), round(luminances.max));
+		roundf(luminances.min * 10000), roundf(luminances.max));
 	// TODO: send target_max_cll and target_max_fall
 	wp_image_description_info_v1_send_done(resource);
 	wl_resource_destroy(resource);
@@ -97434,7 +97434,7 @@ static void WLR_types_wlr_cursor_c_cursor_output_cursor_update(struct wlr_cursor
 			}
 		}
 		wlr_fractional_scale_v1_notify_scale(surface, scale);
-		wlr_surface_set_preferred_buffer_scale(surface, ceil(scale));
+		wlr_surface_set_preferred_buffer_scale(surface, ceilf(scale));
 	} else if (cur->state->xcursor_name != NULL) {
 		struct wlr_xcursor_manager *manager = cur->state->xcursor_manager;
 		const char *name = cur->state->xcursor_name;
@@ -121801,8 +121801,8 @@ void matrix_projection(float mat[static 9], int width, int height,
 	mat[4] = y * -t[4];
 
 	// Translation
-	mat[2] = -copysign(1.0f, mat[0] + mat[1]);
-	mat[5] = -copysign(1.0f, mat[3] + mat[4]);
+	mat[2] = -copysignf(1.0f, mat[0] + mat[1]);
+	mat[5] = -copysignf(1.0f, mat[3] + mat[4]);
 
 	// Identity
 	mat[8] = 1.0f;
@@ -121898,10 +121898,10 @@ void wlr_region_scale_xy(pixman_region32_t *dst, const pixman_region32_t *src,
 	}
 
 	for (int i = 0; i < nrects; ++i) {
-		dst_rects[i].x1 = floor(src_rects[i].x1 * scale_x);
-		dst_rects[i].x2 = ceil(src_rects[i].x2 * scale_x);
-		dst_rects[i].y1 = floor(src_rects[i].y1 * scale_y);
-		dst_rects[i].y2 = ceil(src_rects[i].y2 * scale_y);
+		dst_rects[i].x1 = floorf(src_rects[i].x1 * scale_x);
+		dst_rects[i].x2 = ceilf(src_rects[i].x2 * scale_x);
+		dst_rects[i].y1 = floorf(src_rects[i].y1 * scale_y);
+		dst_rects[i].y2 = ceilf(src_rects[i].y2 * scale_y);
 	}
 
 	pixman_region32_fini(dst);
@@ -122032,17 +122032,17 @@ void wlr_region_rotated_bounds(pixman_region32_t *dst, const pixman_region32_t *
 		double x2 = src_rects[i].x2 - ox;
 		double y2 = src_rects[i].y2 - oy;
 
-		double rx1 = x1 * cos(rotation) - y1 * sin(rotation);
-		double ry1 = x1 * sin(rotation) + y1 * cos(rotation);
+		double rx1 = x1 * cosf(rotation) - y1 * sinf(rotation);
+		double ry1 = x1 * sinf(rotation) + y1 * cosf(rotation);
 
-		double rx2 = x2 * cos(rotation) - y1 * sin(rotation);
-		double ry2 = x2 * sin(rotation) + y1 * cos(rotation);
+		double rx2 = x2 * cosf(rotation) - y1 * sinf(rotation);
+		double ry2 = x2 * sinf(rotation) + y1 * cosf(rotation);
 
-		double rx3 = x2 * cos(rotation) - y2 * sin(rotation);
-		double ry3 = x2 * sin(rotation) + y2 * cos(rotation);
+		double rx3 = x2 * cosf(rotation) - y2 * sinf(rotation);
+		double ry3 = x2 * sinf(rotation) + y2 * cosf(rotation);
 
-		double rx4 = x1 * cos(rotation) - y2 * sin(rotation);
-		double ry4 = x1 * sin(rotation) + y2 * cos(rotation);
+		double rx4 = x1 * cosf(rotation) - y2 * sinf(rotation);
+		double ry4 = x1 * sinf(rotation) + y2 * cosf(rotation);
 
 		x1 = fmin(fmin(rx1, rx2), fmin(rx3, rx4));
 		y1 = fmin(fmin(ry1, ry2), fmin(ry3, ry4));
