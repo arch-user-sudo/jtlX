@@ -79,6 +79,7 @@ typedef struct {
 typedef struct {
 	struct wlr_xdg_popup *xdg_popup;
 	struct wl_listener commit;
+	struct wl_listener reposition;
 	struct wl_listener destroy;
 } Popup;
 
@@ -152,6 +153,18 @@ typedef struct {
 		struct wl_listener key;
 		struct wl_listener destroy;
 	} KeyboardGroup;
+
+/* A virtual keyboard (zwp_virtual_keyboard_v1) is deliberately kept out of the
+ * physical keyboard group: the client supplies its own keymap, and grouping it
+ * would overwrite that keymap with the compositor's. It still goes through the
+ * normal keybinding/seat path, so shortcuts and typing behave like a real
+ * keyboard. */
+typedef struct {
+	struct wlr_keyboard *wlr_keyboard;
+	struct wl_listener key;
+	struct wl_listener modifiers;
+	struct wl_listener destroy;
+} VirtualKeyboard;
 
 typedef struct {
 
@@ -264,10 +277,13 @@ static void createnotify(struct wl_listener *listener, void *data);
 static void createpointer(struct wlr_pointer *pointer);
 static void createpointerconstraint(struct wl_listener *listener, void *data);
 static void createpopup(struct wl_listener *listener, void *data);
+static void createvirtualkeyboard(struct wl_listener *listener, void *data);
+static void repositionpopup(struct wl_listener *listener, void *data);
 static void cursorconstrain(struct wlr_pointer_constraint_v1 *constraint);
 static void cursorframe(struct wl_listener *listener, void *data);
 static void cursorwarptohint(void);
 static void destroypopup(struct wl_listener *listener, void *data);
+static void destroyvirtualkeyboard(struct wl_listener *listener, void *data);
 static void destroydragicon(struct wl_listener *listener, void *data);
 static void destroylayersurfacenotify(struct wl_listener *listener, void *data);
 static void destroynotify(struct wl_listener *listener, void *data);
@@ -314,6 +330,8 @@ static void setupx(void);
 #endif
 static void spawn(const Arg *arg);
 static void startdrag(struct wl_listener *listener, void *data);
+static void virtualkeyboard_key(struct wl_listener *listener, void *data);
+static void virtualkeyboard_modifiers(struct wl_listener *listener, void *data);
 static void tagmon(const Arg *arg);
 static void togglefullscreen(const Arg *arg);
 #ifdef FULLSCREEN_TEARING
@@ -369,6 +387,7 @@ static void *exclusive_focus;
 static unsigned int cursor_mode;
 static struct wlr_scene_tree *drag_icon;
 static KeyboardGroup *kb_group;
+static struct wlr_virtual_keyboard_manager_v1 *virtual_keyboard_mgr;
 static int n_animated = 0;
 #ifdef FULLSCREEN_TEARING
 static int tearing_enabled = 0;
@@ -435,6 +454,7 @@ static struct wl_listener new_pointer_constraint = {.notify = createpointerconst
 static struct wl_listener new_output = {.notify = createmon};
 static struct wl_listener new_xdg_toplevel = {.notify = createnotify};
 static struct wl_listener new_xdg_popup = {.notify = createpopup};
+static struct wl_listener new_virtual_keyboard = {.notify = createvirtualkeyboard};
 static struct wl_listener new_xdg_decoration = {.notify = createdecoration};
 static struct wl_listener new_layer_surface = {.notify = createlayersurface};
 static struct wl_listener output_mgr_apply = {.notify = outputmgrapply};
@@ -528,6 +548,7 @@ cleanuplisteners(void)
 		&new_input_device, &new_pointer_constraint, &new_output,
 		&new_xdg_toplevel, &new_xdg_decoration, &new_xdg_popup,
 		&new_layer_surface, &output_mgr_apply, &output_mgr_test,
+		&new_virtual_keyboard,
 		&request_cursor, &request_set_psel, &request_set_sel,
 		&request_set_cursor_shape, &request_start_drag, &start_drag,
 #ifdef XWAYLAND
@@ -661,6 +682,7 @@ destroypopup(struct wl_listener *listener, void *data)
 	Popup *popup;
 	popup = wl_container_of(listener, popup, destroy);
 	wl_list_remove(&popup->commit.link);
+	wl_list_remove(&popup->reposition.link);
 	wl_list_remove(&popup->destroy.link);
 	free(popup);
 }
@@ -690,6 +712,35 @@ commitpopup(struct wl_listener *listener, void *data)
 		wlr_xdg_popup_destroy(popup);
 		return;
 	}
+	box = type == LayerShell ? l->mon->m : c->mon->w;
+	box.x -= (type == LayerShell ? l->scene->node.x : c->geom.x);
+	box.y -= (type == LayerShell ? l->scene->node.y : c->geom.y);
+	wlr_xdg_popup_unconstrain_from_box(popup, &box);
+}
+
+/* Re-run the constraint whenever the client repositions a popup. Without this
+ * the new positioner geometry is used verbatim, which for a bar popup means
+ * x == -width (off the left edge of the output): the initial commit is
+ * constrained but every later resize, such as the taller wallpaper picker,
+ * would jump the popup off-screen. */
+static void
+repositionpopup(struct wl_listener *listener, void *data)
+{
+	Popup *p;
+	struct wlr_xdg_popup *popup;
+	LayerSurface *l = NULL;
+	Client *c = NULL;
+	struct wlr_box box;
+	int type = -1;
+
+	p = wl_container_of(listener, p, reposition);
+	popup = p->xdg_popup;
+
+	type = toplevel_from_wlr_surface(popup->base->surface, &c, &l);
+	if (!popup->parent || type < 0)
+		return;
+	if ((l && !l->mon) || (c && !c->mon))
+		return;
 	box = type == LayerShell ? l->mon->m : c->mon->w;
 	box.x -= (type == LayerShell ? l->scene->node.x : c->geom.x);
 	box.y -= (type == LayerShell ? l->scene->node.y : c->geom.y);
@@ -742,6 +793,44 @@ createkeyboardgroup(void)
 	group->key_repeat_source = wl_event_loop_add_timer(event_loop, keyrepeat, group);
 	wlr_seat_set_keyboard(seat, &group->wlr_group->keyboard);
 	return group;
+}
+
+static void
+createvirtualkeyboard(struct wl_listener *listener, void *data)
+{
+	struct wlr_virtual_keyboard_v1 *vk = data;
+	VirtualKeyboard *v = ecalloc(1, sizeof(*v));
+
+	v->wlr_keyboard = &vk->keyboard;
+	LISTEN(&vk->keyboard.events.key, &v->key, virtualkeyboard_key);
+	LISTEN(&vk->keyboard.events.modifiers, &v->modifiers,
+			virtualkeyboard_modifiers);
+	LISTEN(&vk->keyboard.base.events.destroy, &v->destroy,
+			destroyvirtualkeyboard);
+
+	/* The client sends its own keymap right after creating the keyboard.
+	 * Seed it with the group keymap so the seat always has a usable one in
+	 * the window before that request arrives. */
+	wlr_keyboard_set_keymap(v->wlr_keyboard,
+			kb_group->wlr_group->keyboard.keymap);
+
+	/* A virtual keyboard makes the seat keyboard-capable even when no
+	 * physical keyboard is present. */
+	wlr_seat_set_capabilities(seat,
+			WL_SEAT_CAPABILITY_POINTER | WL_SEAT_CAPABILITY_KEYBOARD);
+}
+
+static void
+destroyvirtualkeyboard(struct wl_listener *listener, void *data)
+{
+	VirtualKeyboard *vk = wl_container_of(listener, vk, destroy);
+
+	/* wlr_keyboard_finish() asserts that these lists are empty before it
+	 * tears the keyboard down. */
+	wl_list_remove(&vk->key.link);
+	wl_list_remove(&vk->modifiers.link);
+	wl_list_remove(&vk->destroy.link);
+	free(vk);
 }
 
 static void
@@ -923,6 +1012,8 @@ createpopup(struct wl_listener *listener, void *data)
 	popup->xdg_popup = xdg_popup;
 	popup->commit.notify = commitpopup;
 	wl_signal_add(&xdg_popup->base->surface->events.commit, &popup->commit);
+	popup->reposition.notify = repositionpopup;
+	wl_signal_add(&xdg_popup->events.reposition, &popup->reposition);
 	popup->destroy.notify = destroypopup;
 	wl_signal_add(&xdg_popup->events.destroy, &popup->destroy);
 }
@@ -1464,6 +1555,10 @@ setupinput(void)
 
 	kb_group = createkeyboardgroup();
 	wl_list_init(&kb_group->destroy.link);
+
+	virtual_keyboard_mgr = wlr_virtual_keyboard_manager_v1_create(dpy);
+	wl_signal_add(&virtual_keyboard_mgr->events.new_virtual_keyboard,
+			&new_virtual_keyboard);
 
 	output_mgr = wlr_output_manager_v1_create(dpy);
 	wl_signal_add(&output_mgr->events.apply, &output_mgr_apply);
@@ -3335,43 +3430,57 @@ keybinding(uint32_t mods, xkb_keysym_t sym)
 	return 0;
 }
 
+/* Shared key dispatch for physical (grouped) and virtual keyboards. The group
+ * is NULL for virtual keyboards, which have no repeat timer of their own. */
 static void
-keypress(struct wl_listener *listener, void *data)
+dispatchkey(struct wlr_keyboard *kb, struct wlr_keyboard_key_event *event,
+		KeyboardGroup *group)
 {
 	int i;
-
-	KeyboardGroup *group = wl_container_of(listener, group, key);
-	struct wlr_keyboard_key_event *event = data;
 	uint32_t keycode = event->keycode + 8;
 
-	const xkb_keysym_t *syms;
-	int nsyms = xkb_state_key_get_syms(
-			group->wlr_group->keyboard.xkb_state, keycode, &syms);
-
+	const xkb_keysym_t *syms = NULL;
+	int nsyms = 0;
 	int handled = 0;
-	uint32_t mods = wlr_keyboard_get_modifiers(&group->wlr_group->keyboard);
-	if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
-		for (i = 0; i < nsyms; i++)
-			handled = keybinding(mods, syms[i]) || handled;
+	uint32_t mods = 0;
+
+	if (kb->xkb_state) {
+		nsyms = xkb_state_key_get_syms(kb->xkb_state, keycode, &syms);
+		mods = wlr_keyboard_get_modifiers(kb);
+		if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+			for (i = 0; i < nsyms; i++)
+				handled = keybinding(mods, syms[i]) || handled;
+		}
 	}
 
-	if (handled && group->wlr_group->keyboard.repeat_info.delay > 0) {
-		group->mods = mods;
-		group->keysym_count = nsyms < 32 ? nsyms : 32;
-		memcpy(group->keysym_buf, syms, (size_t)group->keysym_count * sizeof(syms[0]));
-		wl_event_source_timer_update(group->key_repeat_source,
-				group->wlr_group->keyboard.repeat_info.delay);
-	} else {
-		wl_event_source_timer_update(group->key_repeat_source, 0);
+	if (group) {
+		if (handled && kb->repeat_info.delay > 0) {
+			group->mods = mods;
+			group->keysym_count = nsyms < 32 ? nsyms : 32;
+			memcpy(group->keysym_buf, syms,
+					(size_t)group->keysym_count * sizeof(syms[0]));
+			wl_event_source_timer_update(group->key_repeat_source,
+					kb->repeat_info.delay);
+		} else {
+			wl_event_source_timer_update(group->key_repeat_source, 0);
+		}
 	}
 
 	if (handled)
 		return;
 
-	wlr_seat_set_keyboard(seat, &group->wlr_group->keyboard);
+	wlr_seat_set_keyboard(seat, kb);
 
 	wlr_seat_keyboard_notify_key(seat, event->time_msec,
 			event->keycode, event->state);
+}
+
+static void
+keypress(struct wl_listener *listener, void *data)
+{
+	KeyboardGroup *group = wl_container_of(listener, group, key);
+
+	dispatchkey(&group->wlr_group->keyboard, data, group);
 }
 
 static void
@@ -3384,6 +3493,23 @@ keypressmod(struct wl_listener *listener, void *data)
 
 	wlr_seat_keyboard_notify_modifiers(seat,
 			&group->wlr_group->keyboard.modifiers);
+}
+
+static void
+virtualkeyboard_key(struct wl_listener *listener, void *data)
+{
+	VirtualKeyboard *vk = wl_container_of(listener, vk, key);
+
+	dispatchkey(vk->wlr_keyboard, data, NULL);
+}
+
+static void
+virtualkeyboard_modifiers(struct wl_listener *listener, void *data)
+{
+	VirtualKeyboard *vk = wl_container_of(listener, vk, modifiers);
+
+	wlr_seat_set_keyboard(seat, vk->wlr_keyboard);
+	wlr_seat_keyboard_notify_modifiers(seat, &vk->wlr_keyboard->modifiers);
 }
 
 static int
