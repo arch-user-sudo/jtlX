@@ -366,6 +366,7 @@ static Client *client_get_parent(Client *c);
 static int client_has_children(Client *c);
 static int client_is_unmanaged(Client *c);
 static void client_notify_enter(struct wlr_surface *s, struct wlr_keyboard *kb);
+static void client_force_focus_surface(struct wlr_surface *s);
 static void client_send_close(Client *c);
 static void client_set_border_color(Client *c, const float color[static 4]);
 static void client_set_fullscreen(Client *c, int fullscreen);
@@ -680,7 +681,28 @@ static void
 destroypopup(struct wl_listener *listener, void *data)
 {
 	Popup *popup;
+	struct wlr_surface *parent;
+	struct wlr_xdg_surface *parent_xdg;
+
 	popup = wl_container_of(listener, popup, destroy);
+
+	/* If this popup held keyboard focus (a layer-shell popup with a grab),
+	 * hand it back. Nested popups return focus to their parent popup; a
+	 * top-level layer popup returns it to the focused client. */
+	if (seat->keyboard_state.focused_surface
+			== popup->xdg_popup->base->surface) {
+		parent = popup->xdg_popup->parent;
+		parent_xdg = parent
+			? wlr_xdg_surface_try_from_wlr_surface(parent) : NULL;
+		if (parent_xdg
+				&& parent_xdg->role == WLR_XDG_SURFACE_ROLE_POPUP) {
+			client_force_focus_surface(parent);
+		} else {
+			wlr_seat_keyboard_notify_clear_focus(seat);
+			focusclient(focustop(selmon), 1);
+		}
+	}
+
 	wl_list_remove(&popup->commit.link);
 	wl_list_remove(&popup->reposition.link);
 	wl_list_remove(&popup->destroy.link);
@@ -700,10 +722,15 @@ commitpopup(struct wl_listener *listener, void *data)
 	p = wl_container_of(listener, p, commit);
 	popup = p->xdg_popup;
 
+	fprintf(stderr, "DBG commitpopup initial=%d parent=%p\n",
+			popup->base->initial_commit, (void *)popup->parent);
+
 	if (!popup->base->initial_commit)
 		return;
 
 	type = toplevel_from_wlr_surface(popup->base->surface, &c, &l);
+	fprintf(stderr, "DBG commitpopup type=%d seat=%p\n", type,
+			(void *)popup->seat);
 	if (!popup->parent || type < 0)
 		return;
 	popup->base->surface->data = wlr_scene_xdg_surface_create(
@@ -716,6 +743,14 @@ commitpopup(struct wl_listener *listener, void *data)
 	box.x -= (type == LayerShell ? l->scene->node.x : c->geom.x);
 	box.y -= (type == LayerShell ? l->scene->node.y : c->geom.y);
 	wlr_xdg_popup_unconstrain_from_box(popup, &box);
+
+	/* Layer-shell popups are pointer-grabbing surfaces whose parent layer
+	 * usually has keyboard interactivity NONE. Give the popup keyboard focus
+	 * so clients such as the JTLab menu can receive typed input. Toplevel
+	 * popups keep focus on their parent toplevel, which is what toolkits
+	 * expect. */
+	if (type == LayerShell && popup->seat)
+		client_force_focus_surface(popup->base->surface);
 }
 
 /* Re-run the constraint whenever the client repositions a popup. Without this
@@ -2065,6 +2100,23 @@ client_notify_enter(struct wlr_surface *s, struct wlr_keyboard *kb)
 				kb->num_keycodes, &kb->modifiers);
 	else
 		wlr_seat_keyboard_notify_enter(seat, s, NULL, 0, NULL);
+}
+
+/* Set keyboard focus directly, bypassing the current seat grab. An xdg_popup
+ * grab deliberately ignores grab-aware enter/clear-focus requests ("keyboard
+ * focus should remain on the popup"), so a grabbing layer-shell popup would
+ * never receive focus through client_notify_enter(). The grab has already been
+ * started by the time the popup's initial commit is handled, hence the direct
+ * call. */
+static void
+client_force_focus_surface(struct wlr_surface *s)
+{
+	struct wlr_keyboard *kb = wlr_seat_get_keyboard(seat);
+
+	wlr_seat_keyboard_enter(seat, s,
+			kb ? kb->keycodes : NULL,
+			kb ? kb->num_keycodes : 0,
+			kb ? &kb->modifiers : NULL);
 }
 
 static int

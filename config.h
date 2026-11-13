@@ -172,7 +172,7 @@ static const Arg startupapps[] = {
 	{ .v = (const char *[]){ "gentoo-pipewire-launcher", NULL } },
 	{ .v = (const char *[]){ "jtlab", NULL } },
 	{ .v = (const char *[]){ "foot", "--server", NULL } },
-	{ .v = (const char *[]){ "jthub", NULL } },
+	{ .v = (const char *[]){ "jtwpi", NULL } },
 };
 
 
@@ -198,11 +198,11 @@ static const Arg startupapps[] = {
  */
 static const Key keys[] = {
 	/* modifier                     key                  function          arg */
-	{ MODKEY,                        XKB_KEY_a,           spawn,            SHCMD("jtlabctl menu") },
+	{ MODKEY,                        XKB_KEY_space,           spawn,            SHCMD("jtlabctl menu") },
 	{ MODKEY,                        XKB_KEY_e,           spawn,            {.v = filecmd} },
 	{ MODKEY,                        XKB_KEY_q,           spawn,            {.v = termcmd} },
 	{ MODKEY,                        XKB_KEY_b,           spawn,            {.v = startup} },
-	{ MODKEY,			XKB_KEY_space,		spawn,		{.v = jtsearch} },
+	{ MODKEY,			XKB_KEY_s,		spawn,		{.v = jtsearch} },
 	{ MODKEY,			XKB_KEY_v,		spawn,		{.v = jtvolume} },
 	{ MODKEY,                        XKB_KEY_j,           focusstack,       {.i = +1} },
 	{ MODKEY,                        XKB_KEY_k,           focusstack,       {.i = -1} },
